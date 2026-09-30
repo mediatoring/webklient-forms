@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.2
+ * Version:           2.5.3
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -926,8 +926,26 @@ final class Webklient_Forms {
 			#wkf-builder .wkf-def-pagebreak-opts { margin-top:8px; color:#50575e; }
 			#wkf-builder .wkf-def-pagebreak-opts[hidden] { display:none; }
 			#wkf-builder .wkf-def-req-wrap[hidden], #wkf-builder .wkf-def-half-wrap[hidden] { display:none; }
-			#wkf-builder .wkf-def-props { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px; color:#50575e; }
-			#wkf-builder .wkf-def-props [hidden] { display:none; }
+			#wkf-builder .wkf-def-icon { display:inline-flex; width:30px; height:30px; flex:0 0 auto; align-items:center; justify-content:center; border-radius:6px; background:#f6f7f7; color:#960000; }
+			#wkf-builder .wkf-def-icon svg { width:18px; height:18px; display:block; }
+			#wkf-builder .wkf-def-adv { margin-top:8px; border-top:1px solid #f0f0f1; padding-top:4px; }
+			#wkf-builder .wkf-def-adv[hidden] { display:none; }
+			#wkf-builder .wkf-def-adv > summary { cursor:pointer; color:#50575e; font-size:12px; padding:3px 0; list-style:none; display:inline-flex; align-items:center; gap:6px; }
+			#wkf-builder .wkf-def-adv > summary::-webkit-details-marker { display:none; }
+			#wkf-builder .wkf-def-adv > summary::before { content:'\25B8'; }
+			#wkf-builder .wkf-def-adv[open] > summary::before { content:'\25BE'; }
+			#wkf-builder .wkf-def-props { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px 18px; margin-top:6px; color:#50575e; }
+			#wkf-builder .wkf-def-props > [hidden] { display:none; }
+			#wkf-builder .wkf-def-props > span { display:flex; flex-direction:column; gap:3px; min-width:0; }
+			#wkf-builder .wkf-def-props > span > input,
+			#wkf-builder .wkf-def-props > span > select { width:100%; max-width:100%; }
+			#wkf-builder .wkf-prop-title { font-size:12px; font-weight:600; color:#1d2327; }
+			#wkf-builder .wkf-prop-note { font-size:11px; color:#787c82; }
+			#wkf-builder .wkf-def-nums { display:flex; gap:6px; }
+			#wkf-builder .wkf-def-nums input { width:100%; min-width:0; }
+			@media screen and (max-width:1100px) {
+				#wkf-builder .wkf-def-props { grid-template-columns:1fr; }
+			}
 			#wkf-builder .wkf-def-key { width:150px; font-family:monospace; }
 			#wkf-builder .wkf-def-hint, #wkf-builder .wkf-def-placeholder, #wkf-builder .wkf-def-default { width:220px; }
 			#wkf-builder .wkf-def-num { width:70px; }
@@ -974,7 +992,8 @@ final class Webklient_Forms {
 			?>
 				<div class="wkf-def-row">
 					<div class="wkf-def-head">
-					<select name="wkf_def_type[]" class="wkf-def-type">
+						<span class="wkf-def-icon" aria-hidden="true"></span>
+						<select name="wkf_def_type[]" class="wkf-def-type">
 							<?php foreach ( $types as $value => $label ) : ?>
 								<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $row['type'], $value ); ?>><?php echo esc_html( $label ); ?></option>
 							<?php endforeach; ?>
@@ -989,20 +1008,45 @@ final class Webklient_Forms {
 					</div>
 					<input type="text" class="widefat wkf-def-label" name="wkf_def_label[]" placeholder="Popisek pole" value="<?php echo esc_attr( $row['label'] ); ?>">
 
-					<div class="wkf-def-props">
-						<span data-x="key">Klíč: <input type="text" class="wkf-def-key" name="wkf_def_key[]" value="<?php echo esc_attr( isset( $row['key'] ) ? $row['key'] : '' ); ?>" placeholder="(vygeneruje se)" pattern="[a-z0-9_]*" title="malá písmena, číslice a podtržítko"> <span class="description">značka <code class="wkf-def-key-tag">{<?php echo esc_html( isset( $row['key'] ) ? $row['key'] : '…' ); ?>}</code></span></span>
-						<span data-x="role">Role:
+					<details class="wkf-def-adv">
+						<summary>Podrobné nastavení pole</summary>
+						<div class="wkf-def-props">
+						<span data-x="role">
+							<span class="wkf-prop-title">Role pole</span>
 							<select name="wkf_def_role[]" class="wkf-def-role">
 								<?php foreach ( $this->field_roles() as $role_key => $role_label ) : ?>
 									<option value="<?php echo esc_attr( $role_key ); ?>" <?php selected( isset( $row['role'] ) ? $row['role'] : '', $role_key ); ?>><?php echo esc_html( $role_label ); ?></option>
 								<?php endforeach; ?>
 							</select>
+							<span class="wkf-prop-note">Určuje chování: adresa našeptává a ověří v RÚIAN, IČO doplní z ARESu.</span>
 						</span>
-						<span data-x="hint"><input type="text" class="wkf-def-hint" name="wkf_def_hint[]" placeholder="nápověda pod polem" value="<?php echo esc_attr( isset( $row['hint'] ) ? $row['hint'] : '' ); ?>"></span>
-						<span data-x="placeholder"><input type="text" class="wkf-def-placeholder" name="wkf_def_placeholder[]" placeholder="placeholder" value="<?php echo esc_attr( isset( $row['placeholder'] ) ? $row['placeholder'] : '' ); ?>"></span>
-						<span data-x="default"><input type="text" class="wkf-def-default" name="wkf_def_default[]" placeholder="výchozí hodnota / předvybraná volba" value="<?php echo esc_attr( isset( $row['default'] ) ? $row['default'] : '' ); ?>"></span>
-						<span data-x="number">Min <input type="text" class="wkf-def-num" name="wkf_def_min[]" value="<?php echo esc_attr( isset( $row['min'] ) ? $row['min'] : '' ); ?>"> Max <input type="text" class="wkf-def-num" name="wkf_def_max[]" value="<?php echo esc_attr( isset( $row['max'] ) ? $row['max'] : '' ); ?>"> Krok <input type="text" class="wkf-def-num" name="wkf_def_step[]" value="<?php echo esc_attr( isset( $row['step'] ) ? $row['step'] : '' ); ?>"></span>
-					</div>
+						<span data-x="key">
+							<span class="wkf-prop-title">Klíč pole</span>
+							<input type="text" class="wkf-def-key" name="wkf_def_key[]" value="<?php echo esc_attr( isset( $row['key'] ) ? $row['key'] : '' ); ?>" placeholder="doplní se z popisku" pattern="[a-z0-9_]*" title="malá písmena, číslice a podtržítko">
+							<span class="wkf-prop-note">Doplňuje se z popisku. Používá se v záznamech, v podmínkách a jako značka <code class="wkf-def-key-tag">{<?php echo esc_html( isset( $row['key'] ) ? $row['key'] : '…' ); ?>}</code> do předmětu a těla e-mailu. Už odeslaným formulářům ho neměňte.</span>
+						</span>
+						<span data-x="placeholder">
+							<span class="wkf-prop-title">Placeholder</span>
+							<input type="text" class="wkf-def-placeholder" name="wkf_def_placeholder[]" placeholder="šedý text uvnitř pole" value="<?php echo esc_attr( isset( $row['placeholder'] ) ? $row['placeholder'] : '' ); ?>">
+						</span>
+						<span data-x="hint">
+							<span class="wkf-prop-title">Nápověda pod polem</span>
+							<input type="text" class="wkf-def-hint" name="wkf_def_hint[]" placeholder="vysvětlující text pod pole" value="<?php echo esc_attr( isset( $row['hint'] ) ? $row['hint'] : '' ); ?>">
+						</span>
+						<span data-x="default">
+							<span class="wkf-prop-title">Výchozí hodnota</span>
+							<input type="text" class="wkf-def-default" name="wkf_def_default[]" placeholder="předvyplněná hodnota" value="<?php echo esc_attr( isset( $row['default'] ) ? $row['default'] : '' ); ?>">
+						</span>
+						<span data-x="number">
+							<span class="wkf-prop-title">Rozsah čísla</span>
+							<span class="wkf-def-nums">
+								<input type="text" class="wkf-def-num" name="wkf_def_min[]" placeholder="min" value="<?php echo esc_attr( isset( $row['min'] ) ? $row['min'] : '' ); ?>">
+								<input type="text" class="wkf-def-num" name="wkf_def_max[]" placeholder="max" value="<?php echo esc_attr( isset( $row['max'] ) ? $row['max'] : '' ); ?>">
+								<input type="text" class="wkf-def-num" name="wkf_def_step[]" placeholder="krok" value="<?php echo esc_attr( isset( $row['step'] ) ? $row['step'] : '' ); ?>">
+							</span>
+						</span>
+						</div>
+					</details>
 
 					<div data-x="pagebreak" class="wkf-def-pagebreak-opts">
 						Tlačítko vpřed (do tohoto kroku): <input type="text" name="wkf_def_btn_next[]" value="<?php echo esc_attr( isset( $row['btn_next'] ) ? $row['btn_next'] : '' ); ?>" placeholder="Pokračovat">
@@ -1164,6 +1208,42 @@ final class Webklient_Forms {
 				row.querySelector('.wkf-def-options').value = lines.join('\n');
 			}
 
+			// Ikony typu pole. Jeden tvar na typ, at je rádek poznat na první pohled.
+			var ICON_PATHS = {
+				text:      '<path d="M4 7h16M4 12h10"/>',
+				email:     '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+				tel:       '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
+				textarea:  '<path d="M4 6h16M4 11h16M4 16h10"/>',
+				adresa:    '<path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+				ico:       '<path d="M4 20V7l7-3 7 3v13"/><path d="M9 20v-5h6v5"/><path d="M4 20h16"/>',
+				number:    '<path d="M6 4v16M14 4v16M3 9h18M3 15h18"/>',
+				date:      '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+				url:       '<path d="M10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/>',
+				select:    '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="m8 11 3 3 3-3"/>',
+				checkbox:  '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="m5 7 1.5 1.5L9 5"/>',
+				file:      '<path d="M14 3v5h5"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>',
+				hidden:    '<path d="M3 3l18 18"/><path d="M10.6 6.2A9 9 0 0 1 21 12a15 15 0 0 1-3.1 3.9M6.6 6.7A15 15 0 0 0 3 12a9 9 0 0 0 11.5 5.3"/>',
+				vop:       '<path d="M9 12l2 2 4-4"/><path d="M5 4h14v16H5z"/>',
+				heading:   '<path d="M6 4v16M18 4v16M6 12h12"/>',
+				content:   '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m4 19 5-5 4 4 3-3 4 4"/>',
+				pagebreak: '<path d="M4 8V5h16v3M4 16v3h16v-3"/><path d="M2 12h20" stroke-dasharray="3 3"/>'
+			};
+
+			function fieldIcon(type) {
+				var inner = ICON_PATHS[type] || ICON_PATHS.text;
+				return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+			}
+
+			// Klíč z popisku: bez diakritiky, malými písmeny, podtržítka místo mezer.
+			function keyFromLabel(label) {
+				return label
+					.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+					.toLowerCase()
+					.replace(/[^a-z0-9]+/g, '_')
+					.replace(/^_+|_+$/g, '')
+					.slice(0, 32);
+			}
+
 			function refreshRow(row) {
 				var type = row.querySelector('.wkf-def-type').value;
 				var extra = row.querySelector('.wkf-def-extra');
@@ -1206,6 +1286,10 @@ final class Webklient_Forms {
 						}
 					}
 				});
+				var icon = row.querySelector('.wkf-def-icon');
+				if (icon) { icon.innerHTML = fieldIcon(type); }
+				var adv = row.querySelector('.wkf-def-adv');
+				if (adv) { adv.hidden = !row.querySelector('.wkf-def-props > [data-x]:not([hidden])'); }
 				extra.hidden = !row.querySelector('.wkf-def-extra [data-x]:not([hidden])');
 				row.querySelector('.wkf-def-label').placeholder = type === 'content' ? 'Interní název bloku (nezobrazuje se)' : (type === 'pagebreak' ? 'Nadpis nového kroku (nepovinný)' : 'Popisek pole');
 				row.querySelector('.wkf-def-default').placeholder = (type === 'select' || type === 'checkbox') ? 'předvybraná volba (více oddělte čárkou)' : 'výchozí hodnota';
@@ -1267,7 +1351,9 @@ final class Webklient_Forms {
 				row.querySelectorAll('input[type="text"], textarea').forEach(function (el) { el.value = ''; });
 				row.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.checked = cb.classList.contains('wkf-opt1-cb') || cb.classList.contains('wkf-opt2-cb') || cb.classList.contains('wkf-ftype-cb'); });
 				row.querySelector('.wkf-optlist-rows').innerHTML = '';
-				row.querySelector('.wkf-def-key').value = '';
+				var newKey = row.querySelector('.wkf-def-key');
+				newKey.value = '';
+				delete newKey.dataset.manual;
 				row.querySelector('.wkf-def-key-tag').textContent = '{…}';
 				row.querySelector('.wkf-def-content-html').value = '';
 				row.querySelector('.wkf-def-cond-rules').value = '[]';
@@ -1515,8 +1601,20 @@ final class Webklient_Forms {
 				}
 			});
 			// Kontrola kolize klíčů při ruční úpravě.
+			// Popisek doplňuje klíč, dokud ho někdo nepřepíše ručně.
+			builder.addEventListener('input', function (e) {
+				if (!e.target.classList.contains('wkf-def-label')) { return; }
+				var row = e.target.closest('.wkf-def-row');
+				var keyInput = row.querySelector('.wkf-def-key');
+				if (!keyInput || keyInput.dataset.manual === '1') { return; }
+				keyInput.value = keyFromLabel(e.target.value);
+				var tag = row.querySelector('.wkf-def-key-tag');
+				if (tag) { tag.textContent = '{' + (keyInput.value || '…') + '}'; }
+			});
+
 			builder.addEventListener('input', function (e) {
 				if (!e.target.classList.contains('wkf-def-key')) { return; }
+				e.target.dataset.manual = '1';
 				var val = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_');
 				e.target.value = val;
 				var dup = 0;
@@ -1532,6 +1630,11 @@ final class Webklient_Forms {
 			if (firstRow) {
 				rowHtml = firstRow.outerHTML;
 			}
+			// Už uložený klíč se z popisku nepřepisuje – vážou se na něj záznamy,
+			// podmínky i značky v e-mailech.
+			container.querySelectorAll('.wkf-def-key').forEach(function (k) {
+				if (k.value) { k.dataset.manual = '1'; }
+			});
 			container.querySelectorAll('.wkf-def-row').forEach(function (row) {
 				var type = row.querySelector('.wkf-def-type').value;
 				var mode = row.querySelector('.wkf-def-mode').value;
@@ -3350,7 +3453,8 @@ final class Webklient_Forms {
 		$status = empty( $release['version'] )
 			? 'fail'
 			: ( version_compare( $release['version'], WKF_VERSION, '>' ) ? 'new:' . $release['version'] : 'current' );
-		wp_safe_redirect( add_query_arg( 'wkf_update', rawurlencode( $status ), admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' ) ) );
+		$back = add_query_arg( 'wkf_update', rawurlencode( $status ), admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' ) );
+		wp_safe_redirect( $back . '#wkf-sec-aktualizace' );
 		exit;
 	}
 
@@ -4448,7 +4552,7 @@ step();});})();</script></div>';
 					<div class="notice notice-<?php echo 0 === strpos( $upd, 'new:' ) ? 'warning' : ( 'current' === $upd ? 'success' : 'error' ); ?> inline"><p>
 						<?php
 						if ( 0 === strpos( $upd, 'new:' ) ) {
-							echo 'K dispozici je verze ' . esc_html( substr( $upd, 4 ) ) . ' – nainstalujete ji v přehledu Pluginy.';
+							echo 'K dispozici je verze ' . esc_html( substr( $upd, 4 ) ) . ' – nainstalujete ji tlačítkem níže.';
 						} elseif ( 'current' === $upd ) {
 							echo 'Máte nejnovější vydanou verzi.';
 						} else {
@@ -4462,10 +4566,26 @@ step();});})();</script></div>';
 					</p></div>
 				<?php endif; ?>
 				<table class="form-table" role="presentation">
+					<?php
+					$release  = $this->latest_release();
+					$has_new  = ! empty( $release['version'] ) && version_compare( $release['version'], WKF_VERSION, '>' );
+					$basename = plugin_basename( WKF_PLUGIN_FILE );
+					?>
 					<tr>
 						<th scope="row">Verze</th>
-						<td><p class="description">Nainstalováno: <strong><?php echo esc_html( WKF_VERSION ); ?></strong>, zdroj vydání: <a href="https://github.com/<?php echo esc_attr( WKF_UPDATE_REPO ); ?>/releases" target="_blank" rel="noopener"><code><?php echo esc_html( WKF_UPDATE_REPO ); ?></code></a>. Nabízejí se jen řádná vydání, předběžná (pre-release) nikoliv.
-						&nbsp;<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_check_update' ), 'wkf_check_update' ) ); ?>" class="button">Zkontrolovat aktualizaci</a></p></td>
+						<td><p class="description">Nainstalováno: <strong><?php echo esc_html( WKF_VERSION ); ?></strong><?php
+							if ( $has_new ) {
+								echo ', k dispozici <strong>' . esc_html( $release['version'] ) . '</strong>';
+							} else {
+								echo ', novější vydání není';
+							}
+						?>. Zdroj: <a href="https://github.com/<?php echo esc_attr( WKF_UPDATE_REPO ); ?>/releases" target="_blank" rel="noopener"><code><?php echo esc_html( WKF_UPDATE_REPO ); ?></code></a>, jen řádná vydání, předběžná (pre-release) nikoliv.</p>
+						<p>
+							<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_check_update' ), 'wkf_check_update' ) ); ?>" class="button">Zkontrolovat aktualizaci</a>
+							<?php if ( $has_new && current_user_can( 'update_plugins' ) ) : ?>
+								&nbsp;<a href="<?php echo esc_url( wp_nonce_url( self_admin_url( 'update.php?action=upgrade-plugin&plugin=' . rawurlencode( $basename ) ), 'upgrade-plugin_' . $basename ) ); ?>" class="button button-primary">Aktualizovat na <?php echo esc_html( $release['version'] ); ?></a>
+							<?php endif; ?>
+						</p></td>
 					</tr>
 				</table>
 				</div>
@@ -4667,6 +4787,27 @@ step();});})();</script></div>';
 				if ( dirty ) {
 					window.history.replaceState( null, '', url.toString() );
 				}
+
+				// Uložení nastavení vrací stránku na začátek. Zapamatujeme si, kde
+				// uživatel byl, a po návratu ho tam vrátíme – s tlačítkem v rohu se ukládá
+				// odkudkoli, takže skok nahoru je pokaždé ztráta místa.
+				var form = document.querySelector('.wrap form[action$="options.php"]');
+				if ( form ) {
+					form.addEventListener( 'submit', function () {
+						try {
+							sessionStorage.setItem( 'wkfSettingsScroll', String( window.scrollY ) );
+						} catch ( e ) {}
+					} );
+				}
+				try {
+					var saved = sessionStorage.getItem( 'wkfSettingsScroll' );
+					if ( null !== saved ) {
+						sessionStorage.removeItem( 'wkfSettingsScroll' );
+						if ( ! window.location.hash ) {
+							window.scrollTo( 0, parseInt( saved, 10 ) || 0 );
+						}
+					}
+				} catch ( e ) {}
 			})();
 			</script>
 		</div>
@@ -6864,7 +7005,7 @@ step();});})();</script></div>';
 		if ( ! $sent && $this->last_mail_error ) {
 			$redirect = add_query_arg( 'wkf_smtp_reason', rawurlencode( mb_strimwidth( $this->last_mail_error, 0, 300 ) ), $redirect );
 		}
-		wp_safe_redirect( $redirect );
+		wp_safe_redirect( $redirect . '#wkf-sec-email' );
 		exit;
 	}
 
