@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.0
+ * Version:           2.5.1
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -39,7 +39,7 @@ if ( defined( 'WKF_VERSION' ) ) {
 	return;
 }
 
-define( 'WKF_VERSION', '2.5.0' );
+define( 'WKF_VERSION', '2.5.1' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -5166,9 +5166,7 @@ step();});})();</script></div>';
 				if ( $suggest ) {
 					echo '<div class="wkf-suggest" role="listbox" hidden></div></div>';
 				}
-				if ( ! empty( $field['hint'] ) ) {
-					echo '<p class="wkf-hint">' . esc_html( $field['hint'] ) . '</p>';
-				}
+				// Nápovědu pod pole doplní render_field_wrapped() pro všechny typy naráz.
 				echo '</div>';
 				break;
 
@@ -5183,9 +5181,6 @@ step();});})();</script></div>';
 				echo '<textarea id="' . esc_attr( $id ) . '" name="' . esc_attr( $name ) . '" rows="' . $rows . '"' . $ph_attr . ( $required ? ' required' : '' ) . ( $suggest ? ' data-wkf-suggest="' . esc_attr( $suggest ) . '"' : '' ) . '>' . esc_textarea( $default ) . '</textarea>';
 				if ( $suggest ) {
 					echo '<div class="wkf-suggest" role="listbox" hidden></div></div>';
-				}
-				if ( ! empty( $field['hint'] ) ) {
-					echo '<p class="wkf-hint">' . esc_html( $field['hint'] ) . '</p>';
 				}
 				echo '</div>';
 				break;
