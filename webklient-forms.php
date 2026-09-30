@@ -3107,6 +3107,11 @@ final class Webklient_Forms {
 		return 'https://api.github.com/repos/' . WKF_UPDATE_REPO . $path;
 	}
 
+	/** Zapamatuje si, proč se vydání nepodařilo načíst (pro hlášku v nastavení). */
+	private function remember_update_error( $reason ) {
+		set_site_transient( 'wkf_update_error', (string) $reason, 6 * HOUR_IN_SECONDS );
+	}
+
 	/** Argumenty requestu na GitHub – veřejné API, bez autorizace. */
 	private function update_request_args() {
 		return array(
@@ -3133,12 +3138,27 @@ final class Webklient_Forms {
 
 		// Jen řádná vydání – pre-release se záměrně nenabízejí.
 		$response = wp_remote_get( $this->update_api_url( '/releases/latest' ), $this->update_request_args() );
-		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+		if ( is_wp_error( $response ) ) {
+			$this->remember_update_error( 'Web se nespojil s api.github.com: ' . $response->get_error_message() );
+			set_site_transient( $cache_key, array(), HOUR_IN_SECONDS );
+			return array();
+		}
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		if ( 200 !== $code ) {
+			if ( 404 === $code ) {
+				// Typický stav nového repozitáře: existuje, ale zatím bez řádného vydání.
+				$this->remember_update_error( 'Repozitář ' . WKF_UPDATE_REPO . ' zatím nemá žádné řádné vydání (Releases). Aktualizace se nabídne, až vydání vznikne.' );
+			} elseif ( 403 === $code || 429 === $code ) {
+				$this->remember_update_error( 'GitHub dočasně odmítl dotaz (limit počtu dotazů, kód ' . $code . '). Zkuste to později.' );
+			} else {
+				$this->remember_update_error( 'GitHub odpověděl kódem ' . $code . '.' );
+			}
 			set_site_transient( $cache_key, array(), HOUR_IN_SECONDS );
 			return array();
 		}
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( empty( $body['tag_name'] ) ) {
+			$this->remember_update_error( 'Odpověď GitHubu neobsahuje označení vydání (tag).' );
 			set_site_transient( $cache_key, array(), HOUR_IN_SECONDS );
 			return array();
 		}
@@ -3159,6 +3179,7 @@ final class Webklient_Forms {
 			'date'      => isset( $body['published_at'] ) ? (string) $body['published_at'] : '',
 			'url'       => isset( $body['html_url'] ) ? (string) $body['html_url'] : '',
 		);
+		delete_site_transient( 'wkf_update_error' );
 		set_site_transient( $cache_key, $release, 6 * HOUR_IN_SECONDS );
 		return $release;
 	}
@@ -4302,7 +4323,11 @@ step();});})();</script></div>';
 						} elseif ( 'current' === $upd ) {
 							echo 'Máte nejnovější vydanou verzi.';
 						} else {
-							echo 'Vydání se nepodařilo načíst – web se nedostal na api.github.com. Zkuste to později, případně ověřte odchozí spojení hostingu.';
+							echo 'Vydání se nepodařilo načíst.';
+							$upd_reason = get_site_transient( 'wkf_update_error' );
+							if ( $upd_reason ) {
+								echo '<br><strong>Důvod:</strong> ' . esc_html( $upd_reason );
+							}
 						}
 						?>
 					</p></div>
