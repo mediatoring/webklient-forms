@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Univerzální náhrada WPForms Pro pro weby Webklient.cz. Čtyři vestavěné formuláře – kontakt, poptávka služeb, kariéra a obecná poptávka – vkládané shortcodem [wk_form type="..."]. Záznam odeslání, e-mailové notifikace, HTML automatická odpověď s WYSIWYG editorem, Cloudflare Turnstile, kontrolní otázka, honeypot, přesměrování na děkovací stránku a nastavitelný styl tlačítka.
- * Version:           2.4.4
+ * Version:           2.4.5
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -39,7 +39,7 @@ if ( defined( 'WKF_VERSION' ) ) {
 	return;
 }
 
-define( 'WKF_VERSION', '2.4.4' );
+define( 'WKF_VERSION', '2.4.5' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -4129,6 +4129,14 @@ step();});})();</script></div>';
 					.wkf-settings-section h3 { font-size:1em; margin:18px 0 4px; padding-top:14px; border-top:1px solid #f0f0f1; }
 					.wkf-settings-section h3:first-of-type { border-top:0; padding-top:0; }
 					.wkf-settings-intro { margin-top:-4px; }
+					/* Ukládací tlačítko zůstává v dohledu i uprostřed dlouhého nastavení. */
+					.wkf-save-sticky { position:fixed; right:24px; bottom:24px; z-index:100; margin:0; padding:10px 14px; background:#fff; border:1px solid #c3c4c7; border-radius:6px; box-shadow:0 2px 14px rgba(0,0,0,.18); }
+					.wkf-save-sticky .button { margin:0; }
+					/* Místo dole, aby tlačítko nepřekrývalo konec stránky. */
+					.wkf-settings-bottom-space { height:70px; }
+					@media screen and (max-width:782px) {
+						.wkf-save-sticky { right:12px; bottom:12px; }
+					}
 				</style>
 				<p class="description" style="font-size:14px;">Tady je jen to, co platí pro celý web. Pole, příjemce, děkovací stránku, automatickou odpověď i webhook si nastavíte u každého formuláře zvlášť v přehledu <a href="<?php echo esc_url( admin_url( 'edit.php?post_type=' . self::CPT_FORM ) ); ?>">Formuláře</a>.</p>
 				<nav class="wkf-settings-nav">
@@ -4267,12 +4275,13 @@ step();});})();</script></div>';
 				<table class="form-table" role="presentation">
 					<tr>
 						<th scope="row"><label for="wkf_ts_site">Turnstile Site Key</label></th>
-						<td><input type="text" id="wkf_ts_site" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[turnstile_site_key]" value="<?php echo esc_attr( $s['turnstile_site_key'] ); ?>"></td>
+						<td><input type="text" id="wkf_ts_site" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[turnstile_site_key]" value="<?php echo esc_attr( $s['turnstile_site_key'] ); ?>">
+						<p class="description">Oba klíče získáte zdarma v <a href="https://dash.cloudflare.com/?to=/:account/turnstile" target="_blank" rel="noopener">Cloudflare → Turnstile</a>: přidejte web (Add site), vyplňte jeho doménu a Cloudflare vypíše Site Key i Secret Key. Bezplatný účet stačí a web nemusí být na Cloudflare hostovaný.</p></td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wkf_ts_secret">Turnstile Secret Key</label></th>
 						<td><input type="text" id="wkf_ts_secret" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[turnstile_secret_key]" value="<?php echo esc_attr( $s['turnstile_secret_key'] ); ?>">
-						<p class="description">Bez vyplněných klíčů se ověření Turnstile přeskočí.</p></td>
+						<p class="description">Secret Key je ten druhý z dvojice u téhož webu v <a href="https://dash.cloudflare.com/?to=/:account/turnstile" target="_blank" rel="noopener">Cloudflare → Turnstile</a>; zůstává na serveru a ověřuje se jím odeslaný formulář. Bez vyplněných klíčů se ověření Turnstile přeskočí.</p></td>
 					</tr>
 					<tr>
 						<th scope="row">Kontrolní otázka</th>
@@ -4299,7 +4308,7 @@ step();});})();</script></div>';
 					<tr>
 						<th scope="row"><label for="wkf_mapy_key">Mapy.cz API klíč</label></th>
 						<td><input type="text" id="wkf_mapy_key" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[mapy_api_key]" value="<?php echo esc_attr( $s['mapy_api_key'] ); ?>">
-						<p class="description">Našeptávání adres funguje i bez klíče (veřejné Photon API nad OSM daty pocházejícími z RÚIAN, omezené na ČR). Vyplněním klíče z developer.mapy.com se přepne na Mapy.cz Suggest API s garantovanou kvalitou a kvótou. Volání jdou přes server webu a klíč se nikdy neposílá do prohlížeče.</p></td>
+						<p class="description">Našeptávání adres funguje i bez klíče (veřejné Photon API nad OSM daty pocházejícími z RÚIAN, omezené na ČR). Vyplněním klíče z <a href="https://developer.mapy.com/" target="_blank" rel="noopener">developer.mapy.com</a> se přepne na Mapy.cz Suggest API s garantovanou kvalitou a kvótou – klíč vznikne po registraci založením projektu v sekci REST API. Volání jdou přes server webu a klíč se nikdy neposílá do prohlížeče.</p></td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wkf_fnx_key">RUIAN API klíč (ruian.fnx.io)</label></th>
@@ -4545,7 +4554,8 @@ step();});})();</script></div>';
 				</details>
 				<?php endif; ?>
 
-				<?php submit_button( 'Uložit nastavení' ); ?>
+				<div class="wkf-settings-bottom-space"></div>
+				<div class="wkf-save-sticky"><?php submit_button( 'Uložit nastavení', 'primary', 'submit', false ); ?></div>
 			</form>
 			<script>
 			(function(){
