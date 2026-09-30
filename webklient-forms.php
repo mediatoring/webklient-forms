@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.1
+ * Version:           2.5.2
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -39,7 +39,10 @@ if ( defined( 'WKF_VERSION' ) ) {
 	return;
 }
 
-define( 'WKF_VERSION', '2.5.1' );
+// Verze je jen v hlavičce výše; konstanta se z ní čte, aby se čísla nemohla rozejít.
+$wkf_header_version = get_file_data( __FILE__, array( 'version' => 'Version' ) );
+define( 'WKF_VERSION', $wkf_header_version['version'] ? $wkf_header_version['version'] : '0.0.0' );
+unset( $wkf_header_version );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -2183,6 +2186,42 @@ final class Webklient_Forms {
 					}
 					break;
 			}
+
+			// Role určuje, k čemu pole slouží, a tím i jeho chování. Bez tohohle
+			// by záleželo ještě na typu pole a dávalo by se dohromady dvakrát totéž:
+			// kdo vybere roli „Adresa realizace (RÚIAN)“, dostane našeptávání
+			// i ověření, ať už nechá typ Text, nebo Víceřádkový text.
+			switch ( $field['role'] ) {
+				case 'adresa':
+					if ( in_array( $field['type'], array( 'text', 'textarea' ), true ) ) {
+						if ( empty( $field['suggest'] ) ) {
+							$field['suggest'] = 'address';
+						}
+						$field['ruian'] = true;
+					}
+					break;
+				case 'ico':
+					if ( 'text' === $field['type'] ) {
+						if ( empty( $field['suggest'] ) ) {
+							$field['suggest'] = 'ares';
+						}
+						if ( empty( $field['hint'] ) ) {
+							$field['hint'] = 'Začněte psát IČO nebo název firmy – údaje doplníme z registru ARES.';
+						}
+					}
+					break;
+				case 'email':
+					if ( 'text' === $field['type'] ) {
+						$field['type'] = 'email';
+					}
+					break;
+				case 'telefon':
+					if ( 'text' === $field['type'] ) {
+						$field['type'] = 'tel';
+					}
+					break;
+			}
+
 			$fields[] = $field;
 		}
 
@@ -5878,7 +5917,10 @@ step();});})();</script></div>';
 		// Ověření adresy realizace v RÚIAN (pole typu adresa, nebo klíč adresa).
 		$address_value = '';
 		foreach ( $schema['fields'] as $field ) {
-			if ( ( ! empty( $field['ruian'] ) || 'adresa' === $field['key'] ) && ! empty( $values[ $field['key'] ] ) ) {
+			$is_address = ! empty( $field['ruian'] )
+				|| 'adresa' === $field['key']
+				|| ( isset( $field['role'] ) && 'adresa' === $field['role'] );
+			if ( $is_address && ! empty( $values[ $field['key'] ] ) ) {
 				$address_value = $values[ $field['key'] ];
 				break;
 			}

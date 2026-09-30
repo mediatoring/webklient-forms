@@ -1,0 +1,60 @@
+name: Vydání pluginu
+
+# Po sloučení do main se podle verze v hlavičce pluginu vytvoří vydání
+# včetně ZIPu se složkou webklient-forms, který plugin umí nainstalovat.
+# Když vydání s touto verzí už existuje, nic se neděje.
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  vydani:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Přečíst verzi z hlavičky pluginu
+        id: verze
+        run: |
+          VERZE=$(grep -m1 -E '^[[:space:]]*\*[[:space:]]*Version:' webklient-forms.php \
+            | sed -E 's/.*Version:[[:space:]]*//' | tr -d '[:space:]')
+          if [ -z "$VERZE" ]; then
+            echo "V hlavičce pluginu není Version." >&2
+            exit 1
+          fi
+          echo "cislo=$VERZE" >> "$GITHUB_OUTPUT"
+          echo "Verze: $VERZE"
+
+      - name: Zjistit, jestli vydání už existuje
+        id: stav
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.verze.outputs.cislo }}" >/dev/null 2>&1; then
+            echo "chybi=ne" >> "$GITHUB_OUTPUT"
+            echo "Vydání v${{ steps.verze.outputs.cislo }} už existuje, přeskakuji."
+          else
+            echo "chybi=ano" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sestavit ZIP se složkou webklient-forms
+        if: steps.stav.outputs.chybi == 'ano'
+        run: |
+          mkdir -p build/webklient-forms
+          rsync -a --exclude '.git' --exclude '.github' --exclude '.gitignore' --exclude 'build' ./ build/webklient-forms/
+          cd build && zip -qr "../webklient-forms-${{ steps.verze.outputs.cislo }}.zip" webklient-forms
+          cd .. && unzip -l "webklient-forms-${{ steps.verze.outputs.cislo }}.zip"
+
+      - name: Publikovat vydání
+        if: steps.stav.outputs.chybi == 'ano'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.verze.outputs.cislo }}" \
+            "webklient-forms-${{ steps.verze.outputs.cislo }}.zip" \
+            --title "Webklient Forms ${{ steps.verze.outputs.cislo }}" \
+            --generate-notes
