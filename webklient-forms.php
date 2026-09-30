@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.3
+ * Version:           2.5.4
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -139,6 +139,7 @@ final class Webklient_Forms {
 		add_action( 'wp_mail_succeeded', array( $this, 'mail_log_success' ) );
 		add_action( 'init', array( $this, 'maybe_create_mail_log_table' ) );
 		add_action( 'admin_post_wkf_mail_log_clear', array( $this, 'mail_log_clear' ) );
+		add_action( 'admin_post_wkf_toggle_import', array( $this, 'toggle_import_box' ) );
 		add_action( 'wkf_webhook_retry', array( $this, 'webhook_dispatch' ) );
 		add_action( 'wkf_daily_retention', array( $this, 'run_retention' ) );
 		add_action( 'init', array( $this, 'schedule_retention' ) );
@@ -779,9 +780,14 @@ final class Webklient_Forms {
 			echo '</div>';
 		}
 
-		// Import z WPForms: z databáze webu (i při deaktivovaném WPForms) nebo ze souboru exportu.
+		// Import z WPForms: z databáze webu (i při deaktivovaném WPForms) nebo ze souboru
+		// exportu. Kdo už migraci má za sebou, blok si schová a nemusí ho vidět napořád.
+		if ( ! get_option( 'wkf_hide_wpforms_import' ) ) :
 		$wpf_posts = get_posts( array( 'post_type' => 'wpforms', 'post_status' => array( 'publish', 'draft' ), 'posts_per_page' => 100, 'orderby' => 'title', 'order' => 'ASC' ) );
-		echo '<div class="notice" style="padding:12px;border-left-color:#960000;"><strong>Import z WPForms:</strong> ';
+		$hide_url  = wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_import&wkf_show=0' ), 'wkf_toggle_import' );
+		echo '<div class="notice" style="padding:12px;border-left-color:#960000;position:relative;">';
+		echo '<a href="' . esc_url( $hide_url ) . '" style="position:absolute;right:10px;top:10px;text-decoration:none;color:#787c82;" title="Skrýt blok importu – vrátíte ho v nastavení">Skrýt ✕</a>';
+		echo '<strong>Import z WPForms:</strong> ';
 		echo '<form method="post" enctype="multipart/form-data" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" style="display:inline;">';
 		echo '<input type="hidden" name="action" value="wkf_import_wpforms">';
 		wp_nonce_field( 'wkf_import_wpforms' );
@@ -797,6 +803,7 @@ final class Webklient_Forms {
 		echo '<button type="submit" class="button">Převést vybrané / soubor</button>';
 		echo '<span class="description" style="margin-left:8px;">Vytvoří koncepty s mapováním původního ID (shortcode <code>[wpforms id]</code> začne vykreslovat nový formulář po deaktivaci WPForms). Data WPForms se nemění.</span>';
 		echo '</form></div>';
+		endif;
 
 		echo '<div class="notice" style="padding:12px;border-left-color:#960000;"><strong>Založit z předlohy:</strong> ';
 		foreach ( $this->seed_definitions() as $seed_key => $seed ) {
@@ -4764,6 +4771,11 @@ step();});})();</script></div>';
 				</details>
 				<?php endif; ?>
 
+				<?php if ( get_option( 'wkf_hide_wpforms_import' ) ) : ?>
+					<p class="description">Blok <strong>Import z WPForms</strong> je v přehledu formulářů skrytý.
+					<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_import&wkf_show=1' ), 'wkf_toggle_import' ) ); ?>">Zobrazit ho znovu</a></p>
+				<?php endif; ?>
+
 				<div class="wkf-settings-bottom-space"></div>
 				<div class="wkf-save-sticky"><?php submit_button( 'Uložit nastavení', 'primary', 'submit', false ); ?></div>
 			</form>
@@ -6765,6 +6777,23 @@ step();});})();</script></div>';
 			array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
 		);
 		$this->current_mail = array();
+	}
+
+	/** Skrytí nebo opětovné zobrazení bloku importu z WPForms. */
+	public function toggle_import_box() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Nedostatečná oprávnění.' );
+		}
+		check_admin_referer( 'wkf_toggle_import' );
+		$show = isset( $_GET['wkf_show'] ) && '1' === $_GET['wkf_show'];
+		if ( $show ) {
+			delete_option( 'wkf_hide_wpforms_import' );
+		} else {
+			update_option( 'wkf_hide_wpforms_import', '1' );
+		}
+		$back = wp_get_referer();
+		wp_safe_redirect( $back ? $back : admin_url( 'edit.php?post_type=' . self::CPT_FORM ) );
+		exit;
 	}
 
 	/** Vyprázdnění logu z administrace. */
