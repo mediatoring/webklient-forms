@@ -59,6 +59,9 @@ final class Webklient_Forms {
 	/** Důvod posledního selhání wp_mail (z hooku wp_mail_failed). */
 	private $last_mail_error = '';
 
+	/** S čím PHPMailer skutečně odesílal – pro diagnostiku testovacího e-mailu. */
+	private $last_mail_debug = '';
+
 	/** Soubory nahrané v právě zpracovávaném odeslání (pro přílohy notifikace). */
 	private $current_uploads = array();
 
@@ -119,6 +122,8 @@ final class Webklient_Forms {
 		add_action( 'wp_ajax_wkf_preview_form', array( $this, 'preview_custom_form' ) );
 		add_action( 'wp_ajax_wkf_cond_options', array( $this, 'cond_options_ajax' ) );
 		add_action( 'phpmailer_init', array( $this, 'setup_smtp' ), 20 );
+		// Záměrně úplně poslední v řadě: zaznamená i to, co po nás přepsal jiný plugin.
+		add_action( 'phpmailer_init', array( $this, 'capture_mail_debug' ), PHP_INT_MAX );
 		add_action( 'wp_mail_failed', array( $this, 'capture_mail_error' ) );
 		add_action( 'wkf_webhook_retry', array( $this, 'webhook_dispatch' ) );
 		add_action( 'wkf_daily_retention', array( $this, 'run_retention' ) );
@@ -4163,6 +4168,9 @@ step();});})();</script></div>';
 						} else {
 							echo 'Testovací e-mail' . ( $test_notice_to ? ' na adresu <strong>' . esc_html( $test_notice_to ) . '</strong>' : '' ) . ' se nepodařilo odeslat – zkontrolujte údaje SMTP serveru.';
 						}
+						if ( isset( $_GET['wkf_smtp_used'] ) && '' !== $_GET['wkf_smtp_used'] ) {
+							echo '<br><strong>Odesláno jako:</strong> ' . esc_html( sanitize_text_field( wp_unslash( $_GET['wkf_smtp_used'] ) ) );
+						}
 						if ( isset( $_GET['wkf_smtp_reason'] ) && '' !== $_GET['wkf_smtp_reason'] ) {
 							echo '<br><strong>Důvod:</strong> ' . esc_html( sanitize_text_field( wp_unslash( $_GET['wkf_smtp_reason'] ) ) );
 						}
@@ -6341,6 +6349,21 @@ step();});})();</script></div>';
 	}
 
 	/** Uloží důvod selhání e-mailu (WordPress ho jinak zahodí). */
+	/** Zaznamená skutečnou konfiguraci PHPMaileru těsně před odesláním. */
+	public function capture_mail_debug( $phpmailer ) {
+		if ( ! $this->sending_form_mail ) {
+			return;
+		}
+		if ( 'smtp' === strtolower( (string) $phpmailer->Mailer ) ) {
+			$transport = 'SMTP ' . $phpmailer->Host . ':' . $phpmailer->Port
+				. ( $phpmailer->SMTPSecure ? ' ' . strtoupper( (string) $phpmailer->SMTPSecure ) : ' bez šifrování' )
+				. ( $phpmailer->SMTPAuth ? ', přihlášen jako ' . $phpmailer->Username : ', bez přihlášení' );
+		} else {
+			$transport = 'funkce mail() serveru – SMTP se vůbec nepoužilo';
+		}
+		$this->last_mail_debug = 'odesílatel ' . $phpmailer->From . ' (' . $transport . ')';
+	}
+
 	public function capture_mail_error( $wp_error ) {
 		if ( $this->sending_form_mail && is_wp_error( $wp_error ) ) {
 			$this->last_mail_error = $wp_error->get_error_message();
@@ -6408,6 +6431,7 @@ step();});})();</script></div>';
 			. 'Odesláno: ' . wp_date( 'j. n. Y H:i:s' );
 
 		$this->last_mail_error   = '';
+		$this->last_mail_debug   = '';
 		$this->sending_form_mail = true;
 		$sent = wp_mail(
 			$to,
@@ -6419,6 +6443,9 @@ step();});})();</script></div>';
 
 		$redirect = add_query_arg( 'wkf_smtp_test', $sent ? 'ok' : 'fail', admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' ) );
 		$redirect = add_query_arg( 'wkf_smtp_to', rawurlencode( $to ), $redirect );
+		if ( $this->last_mail_debug ) {
+			$redirect = add_query_arg( 'wkf_smtp_used', rawurlencode( mb_strimwidth( $this->last_mail_debug, 0, 200 ) ), $redirect );
+		}
 		if ( ! $sent && $this->last_mail_error ) {
 			$redirect = add_query_arg( 'wkf_smtp_reason', rawurlencode( mb_strimwidth( $this->last_mail_error, 0, 300 ) ), $redirect );
 		}
