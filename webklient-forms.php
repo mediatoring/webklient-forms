@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Univerzální náhrada WPForms Pro pro weby Webklient.cz. Čtyři vestavěné formuláře – kontakt, poptávka služeb, kariéra a obecná poptávka – vkládané shortcodem [wk_form type="..."]. Záznam odeslání, e-mailové notifikace, HTML automatická odpověď s WYSIWYG editorem, Cloudflare Turnstile, kontrolní otázka, honeypot, přesměrování na děkovací stránku a nastavitelný styl tlačítka.
- * Version:           2.4.1
+ * Version:           2.4.2
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -17,10 +17,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'WKF_VERSION', '2.4.1' );
+define( 'WKF_VERSION', '2.4.2' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+// Zdroj automatických aktualizací – veřejný repozitář pluginu, není nastavitelný.
+define( 'WKF_UPDATE_REPO', 'mediatoring/webklient-forms' );
 
 final class Webklient_Forms {
 
@@ -313,10 +315,6 @@ final class Webklient_Forms {
 			'ico_enabled'          => 0,
 			// Našeptávání adres (Mapy.cz Suggest API, klíč z developer.mapy.com).
 			'mapy_api_key'         => '',
-			// Automatické aktualizace z GitHubu (veřejné i privátní repo s tokenem).
-			'update_repo'    => 'mediatoring/webklient-forms',
-			'update_token'   => '',
-			'update_prerelease' => 0,
 			// Nenápadný podpis pod formulářem (odkaz na tvůrce webu).
 			'credit'            => 0,
 			// Sledování cesty návštěvníka k poptávce (vstupní stránka, zdroj, kroky).
@@ -412,14 +410,6 @@ final class Webklient_Forms {
 		$out['ico_enabled']          = empty( $input['ico_enabled'] ) ? 0 : 1;
 		$out['mapy_api_key']         = isset( $input['mapy_api_key'] ) ? sanitize_text_field( $input['mapy_api_key'] ) : '';
 		$out['fnx_api_key']          = isset( $input['fnx_api_key'] ) ? sanitize_text_field( $input['fnx_api_key'] ) : '';
-		$out['update_repo']       = isset( $input['update_repo'] ) && preg_match( '#^[\w.-]+/[\w.-]+$#', trim( (string) $input['update_repo'] ) ) ? trim( $input['update_repo'] ) : '';
-		$out['update_prerelease'] = empty( $input['update_prerelease'] ) ? 0 : 1;
-		if ( isset( $input['update_token'] ) && '' !== $input['update_token'] ) {
-			$out['update_token'] = $this->encrypt_secret( sanitize_text_field( $input['update_token'] ) );
-		} else {
-			$existing_upd        = get_option( self::OPTION_KEY, array() );
-			$out['update_token'] = isset( $existing_upd['update_token'] ) ? $existing_upd['update_token'] : '';
-		}
 		$out['credit']          = empty( $input['credit'] ) ? 0 : 1;
 		$out['journey']         = empty( $input['journey'] ) ? 0 : 1;
 		$out['journey_steps']   = isset( $input['journey_steps'] ) ? max( 5, min( 100, absint( $input['journey_steps'] ) ) ) : 30;
@@ -3112,27 +3102,20 @@ final class Webklient_Forms {
 	 * Automatické aktualizace z GitHubu
 	 * ======================================================= */
 
-	/** Základní URL API pro nastavené repo (prázdné = aktualizace vypnuté). */
+	/** Základní URL API pevně nastaveného repozitáře pluginu. */
 	private function update_api_url( $path = '' ) {
-		$s = $this->get_settings();
-		return $s['update_repo'] ? 'https://api.github.com/repos/' . $s['update_repo'] . $path : '';
+		return 'https://api.github.com/repos/' . WKF_UPDATE_REPO . $path;
 	}
 
-	/** Argumenty requestu na GitHub (token jen u privátního repa). */
+	/** Argumenty requestu na GitHub – veřejné API, bez autorizace. */
 	private function update_request_args() {
-		$s    = $this->get_settings();
-		$args = array(
+		return array(
 			'timeout' => 15,
 			'headers' => array(
 				'Accept'     => 'application/vnd.github+json',
 				'User-Agent' => 'webklient-forms/' . WKF_VERSION,
 			),
 		);
-		$token = $this->decrypt_secret( $s['update_token'] );
-		if ( $token ) {
-			$args['headers']['Authorization'] = 'Bearer ' . $token;
-		}
-		return $args;
 	}
 
 	/**
@@ -3140,11 +3123,7 @@ final class Webklient_Forms {
 	 * popis změn a datum – nebo prázdné pole, když se nic nenajde.
 	 */
 	private function latest_release( $force = false ) {
-		$s = $this->get_settings();
-		if ( ! $s['update_repo'] ) {
-			return array();
-		}
-		$cache_key = 'wkf_update_' . md5( $s['update_repo'] . WKF_VERSION );
+		$cache_key = 'wkf_update_' . md5( WKF_UPDATE_REPO . WKF_VERSION );
 		if ( ! $force ) {
 			$cached = get_site_transient( $cache_key );
 			if ( is_array( $cached ) ) {
@@ -3152,16 +3131,13 @@ final class Webklient_Forms {
 			}
 		}
 
-		$endpoint = empty( $s['update_prerelease'] ) ? '/releases/latest' : '/releases?per_page=5';
-		$response = wp_remote_get( $this->update_api_url( $endpoint ), $this->update_request_args() );
+		// Jen řádná vydání – pre-release se záměrně nenabízejí.
+		$response = wp_remote_get( $this->update_api_url( '/releases/latest' ), $this->update_request_args() );
 		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
 			set_site_transient( $cache_key, array(), HOUR_IN_SECONDS );
 			return array();
 		}
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! empty( $s['update_prerelease'] ) && is_array( $body ) ) {
-			$body = isset( $body[0] ) ? $body[0] : array();
-		}
 		if ( empty( $body['tag_name'] ) ) {
 			set_site_transient( $cache_key, array(), HOUR_IN_SECONDS );
 			return array();
@@ -3171,7 +3147,7 @@ final class Webklient_Forms {
 		$package = isset( $body['zipball_url'] ) ? $body['zipball_url'] : '';
 		foreach ( isset( $body['assets'] ) ? (array) $body['assets'] : array() as $asset ) {
 			if ( ! empty( $asset['browser_download_url'] ) && '.zip' === substr( $asset['browser_download_url'], -4 ) ) {
-				$package = $this->decrypt_secret( $s['update_token'] ) ? $asset['url'] : $asset['browser_download_url'];
+				$package = $asset['browser_download_url'];
 				break;
 			}
 		}
@@ -3224,13 +3200,12 @@ final class Webklient_Forms {
 		if ( empty( $release['version'] ) ) {
 			return $result;
 		}
-		$s = $this->get_settings();
 		return (object) array(
 			'name'          => 'Webklient Forms',
 			'slug'          => $args->slug,
 			'version'       => $release['version'],
 			'author'        => '<a href="https://www.webklient.cz">Webklient.cz</a>',
-			'homepage'      => 'https://github.com/' . $s['update_repo'],
+			'homepage'      => 'https://github.com/' . WKF_UPDATE_REPO,
 			'download_link' => $release['package'],
 			'last_updated'  => $release['date'],
 			'sections'      => array(
@@ -4139,7 +4114,12 @@ step();});})();</script></div>';
 				<?php if ( isset( $_GET['wkf_smtp_test'] ) ) : ?>
 					<div class="notice notice-<?php echo 'ok' === $_GET['wkf_smtp_test'] ? 'success' : 'error'; ?> inline"><p>
 						<?php
-						echo 'ok' === $_GET['wkf_smtp_test'] ? 'Testovací e-mail byl odeslán na vaši adresu – zkontrolujte schránku (i spam).' : 'Testovací e-mail se nepodařilo odeslat – zkontrolujte údaje SMTP serveru.';
+						$test_notice_to = isset( $_GET['wkf_smtp_to'] ) ? sanitize_email( wp_unslash( $_GET['wkf_smtp_to'] ) ) : '';
+						if ( 'ok' === $_GET['wkf_smtp_test'] ) {
+							echo 'Testovací e-mail byl odeslán' . ( $test_notice_to ? ' na adresu <strong>' . esc_html( $test_notice_to ) . '</strong>' : '' ) . ' – zkontrolujte schránku (i spam).';
+						} else {
+							echo 'Testovací e-mail' . ( $test_notice_to ? ' na adresu <strong>' . esc_html( $test_notice_to ) . '</strong>' : '' ) . ' se nepodařilo odeslat – zkontrolujte údaje SMTP serveru.';
+						}
 						if ( isset( $_GET['wkf_smtp_reason'] ) && '' !== $_GET['wkf_smtp_reason'] ) {
 							echo '<br><strong>Důvod:</strong> ' . esc_html( sanitize_text_field( wp_unslash( $_GET['wkf_smtp_reason'] ) ) );
 						}
@@ -4158,23 +4138,74 @@ step();});})();</script></div>';
 					<tr>
 						<th scope="row"><label for="wkf_smtp_host">SMTP server</label></th>
 						<td><input type="text" id="wkf_smtp_host" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_host]" value="<?php echo esc_attr( $s['smtp_host'] ); ?>" placeholder="smtp.seznam.cz">
-						&nbsp;Port: <input type="number" style="width:90px;" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_port]" value="<?php echo esc_attr( $s['smtp_port'] ); ?>">
-						&nbsp;Zabezpečení: <select name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_secure]">
-							<option value="tls" <?php selected( $s['smtp_secure'], 'tls' ); ?>>TLS (STARTTLS, port 587)</option>
-							<option value="ssl" <?php selected( $s['smtp_secure'], 'ssl' ); ?>>SSL (port 465)</option>
-							<option value="" <?php selected( $s['smtp_secure'], '' ); ?>>žádné</option>
-						</select></td>
+						&nbsp;<label for="wkf_smtp_secure">Zabezpečení:</label> <select id="wkf_smtp_secure" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_secure]">
+							<option value="tls" data-wkf-port="587" <?php selected( $s['smtp_secure'], 'tls' ); ?>>TLS (STARTTLS, port 587)</option>
+							<option value="ssl" data-wkf-port="465" <?php selected( $s['smtp_secure'], 'ssl' ); ?>>SSL (port 465)</option>
+							<option value="" data-wkf-port="25" <?php selected( $s['smtp_secure'], '' ); ?>>žádné (port 25)</option>
+						</select>
+						&nbsp;<label for="wkf_smtp_port">Port:</label> <input type="number" id="wkf_smtp_port" style="width:90px;" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_port]" value="<?php echo esc_attr( $s['smtp_port'] ); ?>">
+						<p class="description">Port se při změně zabezpečení doplní sám (TLS 587, SSL 465, bez šifrování 25). Nestandardní port, který si zadáte ručně, zůstane zachován.</p></td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wkf_smtp_user">Přihlášení</label></th>
 						<td><input type="text" id="wkf_smtp_user" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_user]" value="<?php echo esc_attr( $s['smtp_user'] ); ?>" placeholder="uživatel (e-mail)" autocomplete="off">
 						&nbsp;<input type="password" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[smtp_pass]" value="" placeholder="<?php echo $s['smtp_pass'] ? 'heslo uloženo – vyplňte jen pro změnu' : 'heslo'; ?>" autocomplete="new-password">
-						<p class="description">Heslo se ukládá šifrovaně (AES-256, klíč odvozený ze security saltů webu). Odesílatel a jméno se přebírají ze sekce Odesílatel e-mailů výše.
+						<p class="description">Heslo se ukládá šifrovaně (AES-256, klíč odvozený ze security saltů webu). Odesílatel a jméno se přebírají ze sekce Odesílatel e-mailů výše.</p></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wkf_smtp_test_to">Testovací e-mail</label></th>
+						<td>
 						<?php if ( $s['smtp_mode'] && $s['smtp_host'] ) : ?>
-							&nbsp;<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_smtp_test' ), 'wkf_smtp_test' ) ); ?>" class="button">Odeslat testovací e-mail</a>
-						<?php endif; ?></p></td>
+							<input type="email" id="wkf_smtp_test_to" class="regular-text" value="<?php echo esc_attr( wp_get_current_user()->user_email ); ?>" placeholder="adresa, kam test odejít" autocomplete="off">
+							&nbsp;<a id="wkf_smtp_test_btn" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_smtp_test' ), 'wkf_smtp_test' ) ); ?>" class="button">Odeslat testovací e-mail</a>
+							<p class="description">Test se odesílá podle <strong>uloženého</strong> nastavení – pokud jste údaje právě měnili, nejdřív nastavení uložte. Prázdné pole = test půjde na adresu přihlášeného uživatele.</p>
+						<?php else : ?>
+							<p class="description">Test bude k dispozici po uložení režimu a adresy SMTP serveru.</p>
+						<?php endif; ?>
+						</td>
 					</tr>
 				</table>
+				<script>
+				(function(){
+					var sec  = document.getElementById('wkf_smtp_secure'),
+						port = document.getElementById('wkf_smtp_port');
+					if ( sec && port ) {
+						// Standardní porty se přepnou samy, ručně zadaný nestandardní port zůstává.
+						var standard = [ '', '25', '465', '587' ];
+						sec.addEventListener( 'change', function () {
+							var opt = sec.options[ sec.selectedIndex ],
+								def = opt ? opt.getAttribute( 'data-wkf-port' ) : '';
+							if ( ! def ) {
+								return;
+							}
+							if ( standard.indexOf( String( port.value ).trim() ) === -1 ) {
+								return;
+							}
+							port.value = def;
+						} );
+					}
+					var to  = document.getElementById('wkf_smtp_test_to'),
+						btn = document.getElementById('wkf_smtp_test_btn');
+					if ( ! to || ! btn ) {
+						return;
+					}
+					var base = btn.getAttribute('href');
+					function sync() {
+						var val = to.value.trim();
+						btn.setAttribute( 'href', val ? base + '&wkf_test_to=' + encodeURIComponent( val ) : base );
+					}
+					to.addEventListener( 'input', sync );
+					to.addEventListener( 'keydown', function ( e ) {
+						// Enter v poli spustí test, ne uložení celého nastavení.
+						if ( 'Enter' === e.key ) {
+							e.preventDefault();
+							sync();
+							btn.click();
+						}
+					} );
+					sync();
+				})();
+				</script>
 
 				</div>
 
@@ -4260,7 +4291,7 @@ step();});})();</script></div>';
 
 				<div class="wkf-settings-section" id="wkf-sec-aktualizace">
 				<h2 class="wkf-settings-title">Aktualizace pluginu</h2>
-				<p class="description wkf-settings-intro">Plugin se aktualizuje přímo z GitHubu – nové vydání se nabídne v přehledu pluginů jako každá jiná aktualizace.</p>
+				<p class="description wkf-settings-intro">Plugin se aktualizuje přímo z GitHubu – nové vydání se nabídne v přehledu pluginů jako každá jiná aktualizace. Zdroj je pevně dán repozitářem pluginu a nenastavuje se.</p>
 				<?php if ( isset( $_GET['wkf_update'] ) ) :
 					$upd = sanitize_text_field( wp_unslash( $_GET['wkf_update'] ) );
 					?>
@@ -4271,29 +4302,16 @@ step();});})();</script></div>';
 						} elseif ( 'current' === $upd ) {
 							echo 'Máte nejnovější vydanou verzi.';
 						} else {
-							echo 'Vydání se nepodařilo načíst – zkontrolujte název repozitáře, dostupnost GitHubu a u privátního repa platnost tokenu.';
+							echo 'Vydání se nepodařilo načíst – web se nedostal na api.github.com. Zkuste to později, případně ověřte odchozí spojení hostingu.';
 						}
 						?>
 					</p></div>
 				<?php endif; ?>
 				<table class="form-table" role="presentation">
 					<tr>
-						<th scope="row"><label for="wkf_update_repo">Repozitář</label></th>
-						<td><input type="text" id="wkf_update_repo" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[update_repo]" value="<?php echo esc_attr( $s['update_repo'] ); ?>" placeholder="uzivatel/repozitar">
-						<p class="description">Ve tvaru <code>uzivatel/repozitar</code>. Aktualizace se berou z vydání (Releases) – tag <code>v2.3.0</code> nebo <code>2.3.0</code> musí odpovídat verzi v hlavičce pluginu. Prázdné = aktualizace vypnuté.</p></td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="wkf_update_token">Token (privátní repo)</label></th>
-						<td><input type="password" id="wkf_update_token" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[update_token]" value="" placeholder="<?php echo $s['update_token'] ? 'token uložen – vyplňte jen pro změnu' : 'nepovinné, jen pro privátní repozitář'; ?>" autocomplete="new-password">
-						<p class="description">Personal access token s právem číst obsah repozitáře. Ukládá se šifrovaně a posílá se jen na api.github.com.</p></td>
-					</tr>
-					<tr>
-						<th scope="row">Předběžná vydání</th>
-						<td><label><input type="checkbox" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[update_prerelease]" value="1" <?php checked( ! empty( $s['update_prerelease'] ) ); ?>> Nabízet i předběžná vydání (pre-release)</label>
-						<p class="description">Aktuálně nainstalovaná verze: <strong><?php echo esc_html( WKF_VERSION ); ?></strong>.
-						<?php if ( $s['update_repo'] ) : ?>
-							&nbsp;<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_check_update' ), 'wkf_check_update' ) ); ?>" class="button">Zkontrolovat aktualizaci</a>
-						<?php endif; ?></p></td>
+						<th scope="row">Verze</th>
+						<td><p class="description">Nainstalováno: <strong><?php echo esc_html( WKF_VERSION ); ?></strong>, zdroj vydání: <a href="https://github.com/<?php echo esc_attr( WKF_UPDATE_REPO ); ?>/releases" target="_blank" rel="noopener"><code><?php echo esc_html( WKF_UPDATE_REPO ); ?></code></a>. Nabízejí se jen řádná vydání, předběžná (pre-release) nikoliv.
+						&nbsp;<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_check_update' ), 'wkf_check_update' ) ); ?>" class="button">Zkontrolovat aktualizaci</a></p></td>
 					</tr>
 				</table>
 				</div>
@@ -6324,16 +6342,21 @@ step();});})();</script></div>';
 		check_admin_referer( 'wkf_smtp_test' );
 
 		$user = wp_get_current_user();
+		$to   = isset( $_GET['wkf_test_to'] ) ? sanitize_email( wp_unslash( $_GET['wkf_test_to'] ) ) : '';
+		if ( ! $to || ! is_email( $to ) ) {
+			$to = $user->user_email;
+		}
 		$this->last_mail_error   = '';
 		$this->sending_form_mail = true;
 		$sent = wp_mail(
-			$user->user_email,
+			$to,
 			'Webklient Forms – test SMTP (' . wp_parse_url( home_url(), PHP_URL_HOST ) . ')',
 			"Tento e-mail ověřuje nastavení SMTP odesílání v pluginu Webklient Forms.\n\nOdesláno: " . wp_date( 'j. n. Y H:i:s' )
 		);
 		$this->sending_form_mail = false;
 
 		$redirect = add_query_arg( 'wkf_smtp_test', $sent ? 'ok' : 'fail', admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' ) );
+		$redirect = add_query_arg( 'wkf_smtp_to', rawurlencode( $to ), $redirect );
 		if ( ! $sent && $this->last_mail_error ) {
 			$redirect = add_query_arg( 'wkf_smtp_reason', rawurlencode( mb_strimwidth( $this->last_mail_error, 0, 300 ) ), $redirect );
 		}

@@ -55,15 +55,16 @@ příslušné funkce zůstanou vypnuté.
 ## Automatické aktualizace
 
 Plugin se aktualizuje z vydání (Releases) tohoto repozitáře a novou verzi
-nabídne v přehledu pluginů jako kteroukoli jinou. Repozitář je předvyplněný
-v **Nastavení → Aktualizace pluginu**, kde je i tlačítko pro okamžitou
-kontrolu. U privátního repozitáře se doplňuje přístupový token, který se
-ukládá šifrovaně.
+nabídne v přehledu pluginů jako kteroukoli jinou. Zdroj je zabudovaný
+v pluginu (konstanta `WKF_UPDATE_REPO`), nenastavuje se a nepotřebuje token –
+v **Nastavení → Aktualizace pluginu** je jen nainstalovaná verze a tlačítko
+pro okamžitou kontrolu. Předběžná vydání (pre-release) se nenabízejí.
 
 ### Vydání nové verze
 
 1. Zvyšte `Version:` v hlavičce `webklient-forms.php` i konstantu `WKF_VERSION`.
-2. Vytvořte vydání s tagem `v2.4.0` nebo `2.4.0` – číslo musí odpovídat hlavičce.
+2. Vytvořte řádné vydání (ne pre-release) s tagem `v2.4.0` nebo `2.4.0` –
+   číslo musí odpovídat hlavičce.
 3. Volitelně přiložte ZIP se složkou `webklient-forms/`; jinak se použije
    zdrojový archiv, složku si plugin při instalaci sám pojmenuje správně.
 4. Popis vydání se zobrazí jako seznam změn v okně „Zobrazit podrobnosti".
