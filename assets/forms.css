@@ -1,0 +1,423 @@
+/* Webklient Forms – záměrně neutrální styl, který přebírá typografii šablony. */
+
+.wkf-form {
+	max-width: 100%;
+}
+
+.wkf-field {
+	margin: 0 0 1.25rem;
+}
+
+.wkf-label {
+	display: block;
+	font-weight: 600;
+	margin-bottom: 0.4rem;
+}
+
+.wkf-req {
+	color: #d63638;
+}
+
+.wkf-form input[type="text"],
+.wkf-form input[type="email"],
+.wkf-form input[type="tel"],
+.wkf-form select,
+.wkf-form textarea {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 0.55rem 0.75rem;
+	border: 1px solid #c8c8c8;
+	border-radius: 4px;
+	background: #fff;
+	font: inherit;
+}
+
+.wkf-form input:focus,
+.wkf-form select:focus,
+.wkf-form textarea:focus {
+	outline: 2px solid transparent;
+	border-color: #666;
+	box-shadow: 0 0 0 1px #666;
+}
+
+.wkf-row {
+	display: flex;
+	gap: 1.25rem;
+}
+
+/* Poloviční sloupce dělí dostupnou šířku vždy 50/50 – i v úzkých
+   kontejnerech (karta v sidebaru). Pod sebe se skládají až na mobilech. */
+.wkf-row .wkf-col {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+@media (max-width: 480px) {
+	.wkf-row {
+		flex-wrap: wrap;
+	}
+
+	.wkf-row .wkf-col {
+		flex-basis: 100%;
+	}
+}
+
+.wkf-checkboxes {
+	border: 0;
+	padding: 0;
+}
+
+.wkf-checkboxes legend {
+	padding: 0;
+}
+
+.wkf-check {
+	display: block;
+	margin: 0.25rem 0;
+	font-weight: 400;
+	cursor: pointer;
+}
+
+.wkf-checkboxes-inline .wkf-check {
+	display: inline-block;
+	margin-right: 1.25rem;
+}
+
+.wkf-dropzone {
+	position: relative;
+	border: 1px dashed #b5b5b5;
+	border-radius: 4px;
+	background: #f5f5f5;
+	padding: 2rem 1rem;
+	text-align: center;
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wkf-dropzone input[type="file"] {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	opacity: 0;
+	cursor: pointer;
+}
+
+.wkf-dropzone.wkf-dragover {
+	background: #ececec;
+	border-color: #666;
+}
+
+.wkf-dropzone-file {
+	display: block;
+	margin-top: 0.5rem;
+	font-weight: 600;
+	word-break: break-all;
+}
+
+.wkf-hint {
+	font-size: 0.85em;
+	color: #666;
+	margin-top: 0.4rem;
+}
+
+.wkf-antispam-hint {
+	font-weight: 400;
+	margin: 0 0 0.4rem;
+}
+
+.wkf-empty {
+	color: #666;
+	font-style: italic;
+}
+
+/* Honeypot – skryté pole proti spamu. */
+.wkf-hp {
+	position: absolute !important;
+	left: -9999px !important;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+}
+
+.wkf-message {
+	display: none;
+	margin: 0 0 1.25rem;
+	padding: 0.75rem 1rem;
+	border-radius: 4px;
+}
+
+.wkf-message-error {
+	display: block;
+	background: #fcebea;
+	color: #8a1f1c;
+	border: 1px solid #e7b3b1;
+}
+
+.wkf-message-success {
+	display: block;
+	background: #edf7ed;
+	color: #1e4620;
+	border: 1px solid #b7dfb9;
+}
+
+.wkf-submit {
+	cursor: pointer;
+}
+
+.wkf-submit[disabled] {
+	opacity: 0.6;
+	cursor: wait;
+}
+
+.wkf-turnstile {
+	min-height: 65px;
+}
+
+/* Ceny položek a orientační součet. */
+.wkf-price {
+	color: #666;
+	font-size: 0.92em;
+}
+
+.wkf-total {
+	margin: 0.8rem 0;
+	padding: 0.6rem 0.8rem;
+	background: #f7f7f7;
+	border: 1px solid #ddd;
+	border-radius: 6px;
+}
+
+/* Našeptávání (ARES, adresy). Tvrdé resety kvůli stylům šablon. */
+.wkf-suggest-wrap {
+	position: relative;
+	display: block;
+}
+
+.wkf-suggest {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
+	z-index: 99999;
+	margin: 0 !important;
+	padding: 4px !important;
+	list-style: none !important;
+	background: #fff;
+	border: 1px solid #d5d5d5;
+	border-radius: 8px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+	max-height: 280px;
+	overflow-y: auto;
+	text-align: left;
+}
+
+.wkf-suggest-item {
+	display: block;
+	padding: 0.55rem 0.7rem !important;
+	margin: 0 !important;
+	border: 0;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 0.95em;
+	line-height: 1.4;
+	color: #222;
+	background: transparent;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.wkf-suggest-item strong {
+	display: block;
+	font-weight: 600;
+	color: #111;
+}
+
+.wkf-suggest-meta {
+	display: block;
+	font-size: 0.85em;
+	color: #666;
+	margin-top: 2px;
+}
+
+.wkf-suggest-item:hover,
+.wkf-suggest-item.wkf-active {
+	background: #f0f0f0;
+}
+
+.wkf-suggest-loading {
+	padding: 0.55rem 0.7rem;
+	color: #888;
+	font-size: 0.9em;
+	font-style: italic;
+}
+
+
+/* Podmíněná pole a shrnutí po odeslání. */
+.wkf-cond[hidden] {
+	display: none;
+}
+
+.wkf-summary {
+	margin-top: 1rem;
+	padding: 1rem 1.25rem;
+	background: #f7f7f7;
+	border: 1px solid #ddd;
+	border-radius: 6px;
+}
+
+.wkf-summary-title {
+	margin: 0 0 0.75rem;
+	font-size: 1.05em;
+}
+
+.wkf-summary dl {
+	margin: 0;
+}
+
+.wkf-summary dt {
+	font-weight: 600;
+	margin-top: 0.6rem;
+}
+
+.wkf-summary dd {
+	margin: 0.1rem 0 0;
+}
+
+/* Počet kusů u ceníkových položek. */
+.wkf-qty {
+	width: 64px;
+	padding: 0.25rem 0.4rem;
+}
+
+.wkf-qty-wrap[hidden] {
+	display: none;
+}
+
+/* Obsahový blok a nápověda. */
+.wkf-content img {
+	max-width: 100%;
+	height: auto;
+}
+
+.wkf-content {
+	margin: 0 0 1.25rem;
+}
+
+/* Vícekrokové formuláře – kroky jsou bez JS všechny viditelné. */
+.wkf-visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+
+.wkf-stepped .wkf-step-inactive {
+	display: none;
+}
+
+.wkf-step-title:focus {
+	outline: 2px solid currentColor;
+	outline-offset: 4px;
+}
+
+.wkf-step-nav {
+	display: flex;
+	gap: 0.75rem;
+	margin: 1rem 0;
+}
+
+.wkf-step-nav button {
+	padding: 0.6rem 1.2rem;
+	border-radius: 6px;
+	border: 2px solid #444;
+	background: #fff;
+	color: #222;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.wkf-step-nav button:focus-visible {
+	outline: 3px solid #005fcc;
+	outline-offset: 2px;
+}
+
+.wkf-progress {
+	margin: 0 0 1rem;
+	font-weight: 600;
+}
+
+.wkf-progress-steps {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.wkf-progress-steps li {
+	flex: 1 1 120px;
+	padding: 0.4rem 0.6rem;
+	border: 2px solid #999;
+	border-radius: 6px;
+	background: #f4f4f4;
+	color: #333;
+	font-size: 0.92em;
+}
+
+.wkf-progress-steps li.is-done {
+	border-style: dashed;
+}
+
+.wkf-progress-steps li.is-current {
+	border-color: var(--wkf-brand, #960000);
+	background: var(--wkf-brand, #960000);
+	color: #fff;
+	font-weight: 700;
+}
+
+.wkf-step-errors {
+	margin: 0 0 1rem;
+	padding: 0.75rem 1rem;
+	border: 2px solid #b32d2e;
+	border-radius: 6px;
+	background: #fff5f5;
+	color: #7a1e1e;
+}
+
+.wkf-step-errors a {
+	color: #7a1e1e;
+	text-decoration: underline;
+}
+
+.wkf-field-error {
+	margin: 0.3rem 0 0;
+	color: #b32d2e;
+	font-size: 0.92em;
+}
+
+[aria-invalid="true"] {
+	border-color: #b32d2e !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.wkf-form * {
+		scroll-behavior: auto !important;
+		transition: none !important;
+	}
+}
+
+/* Nenápadný podpis pod formulářem. */
+.wkf-credit {
+	margin: 0.75rem 0 0;
+	font-size: 0.82em;
+	opacity: 0.65;
+}
+
+.wkf-credit a {
+	color: inherit;
+}
