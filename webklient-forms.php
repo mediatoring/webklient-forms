@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.4
+ * Version:           2.5.5
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -139,7 +139,7 @@ final class Webklient_Forms {
 		add_action( 'wp_mail_succeeded', array( $this, 'mail_log_success' ) );
 		add_action( 'init', array( $this, 'maybe_create_mail_log_table' ) );
 		add_action( 'admin_post_wkf_mail_log_clear', array( $this, 'mail_log_clear' ) );
-		add_action( 'admin_post_wkf_toggle_import', array( $this, 'toggle_import_box' ) );
+		add_action( 'admin_post_wkf_toggle_box', array( $this, 'toggle_admin_box' ) );
 		add_action( 'wkf_webhook_retry', array( $this, 'webhook_dispatch' ) );
 		add_action( 'wkf_daily_retention', array( $this, 'run_retention' ) );
 		add_action( 'init', array( $this, 'schedule_retention' ) );
@@ -148,6 +148,8 @@ final class Webklient_Forms {
 		add_action( 'admin_post_wkf_export_form', array( $this, 'export_form_json' ) );
 		add_action( 'admin_post_wkf_export_entries', array( $this, 'export_entries' ) );
 		add_action( 'restrict_manage_posts', array( $this, 'entries_filter_dropdown' ) );
+		add_filter( 'bulk_actions-edit-' . self::CPT_ENTRY, array( $this, 'entries_bulk_actions' ) );
+		add_filter( 'handle_bulk_actions-edit-' . self::CPT_ENTRY, array( $this, 'handle_entries_bulk_export' ), 10, 3 );
 		add_action( 'wp_dashboard_setup', array( $this, 'register_dashboard_widget' ) );
 		add_action( 'save_post', array( $this, 'flush_usage_cache' ), 5 );
 		add_action( 'pre_get_posts', array( $this, 'entries_filter_query' ) );
@@ -711,25 +713,9 @@ final class Webklient_Forms {
 			return;
 		}
 
-		// Výpis záznamů: tlačítka exportu (přenášejí aktuální filtr výpisu).
+		// Výpis záznamů: export se nabízí ve filtrační liště a v hromadných akcích,
+		// tady zbývá jen nabídka migrace z WPForms.
 		if ( 'edit-' . self::CPT_ENTRY === $screen->id ) {
-			$filter_args = array();
-			foreach ( array( 'wkf_form_filter', 'm', 's' ) as $carry ) {
-				if ( ! empty( $_GET[ $carry ] ) ) {
-					$filter_args[ $carry ] = sanitize_text_field( wp_unslash( $_GET[ $carry ] ) );
-				}
-			}
-			$base     = add_query_arg( $filter_args, admin_url( 'admin-post.php?action=wkf_export_entries' ) );
-			$csv      = wp_nonce_url( add_query_arg( 'format', 'csv', $base ), 'wkf_export_entries' );
-			$xlsx     = wp_nonce_url( add_query_arg( 'format', 'xlsx', $base ), 'wkf_export_entries' );
-			$filtered = ! empty( $filter_args );
-			echo '<div class="notice" style="padding:12px;border-left-color:#960000;"><strong>Export záznamů:</strong> ';
-			echo '<a href="' . esc_url( $csv ) . '" class="button" style="margin-right:6px;">Stáhnout CSV</a>';
-			if ( class_exists( 'ZipArchive' ) ) {
-				echo '<a href="' . esc_url( $xlsx ) . '" class="button">Stáhnout XLSX</a>';
-			}
-			echo '<span class="description" style="margin-left:8px;">' . ( $filtered ? 'Exportují se záznamy podle aktuálního filtru (formulář, měsíc, hledání).' : 'Bez nastaveného filtru se exportují všechny záznamy.' ) . '</span>';
-			echo '</div>';
 			if ( current_user_can( 'manage_options' ) && $this->wpforms_entries_table_exists() ) {
 				$this->render_migration_box();
 			}
@@ -784,7 +770,7 @@ final class Webklient_Forms {
 		// exportu. Kdo už migraci má za sebou, blok si schová a nemusí ho vidět napořád.
 		if ( ! get_option( 'wkf_hide_wpforms_import' ) ) :
 		$wpf_posts = get_posts( array( 'post_type' => 'wpforms', 'post_status' => array( 'publish', 'draft' ), 'posts_per_page' => 100, 'orderby' => 'title', 'order' => 'ASC' ) );
-		$hide_url  = wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_import&wkf_show=0' ), 'wkf_toggle_import' );
+		$hide_url  = wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_box&wkf_box=import&wkf_show=0' ), 'wkf_toggle_box' );
 		echo '<div class="notice" style="padding:12px;border-left-color:#960000;position:relative;">';
 		echo '<a href="' . esc_url( $hide_url ) . '" style="position:absolute;right:10px;top:10px;text-decoration:none;color:#787c82;" title="Skrýt blok importu – vrátíte ho v nastavení">Skrýt ✕</a>';
 		echo '<strong>Import z WPForms:</strong> ';
@@ -805,7 +791,10 @@ final class Webklient_Forms {
 		echo '</form></div>';
 		endif;
 
-		echo '<div class="notice" style="padding:12px;border-left-color:#960000;"><strong>Založit z předlohy:</strong> ';
+		if ( ! get_option( 'wkf_hide_seed_box' ) ) :
+		echo '<div class="notice" style="padding:12px;border-left-color:#960000;position:relative;">';
+		echo '<a href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_box&wkf_box=seed&wkf_show=0' ), 'wkf_toggle_box' ) ) . '" style="position:absolute;right:10px;top:10px;text-decoration:none;color:#787c82;" title="Skrýt blok předloh – vrátíte ho v nastavení">Skrýt ✕</a>';
+		echo '<strong>Založit z předlohy:</strong> ';
 		foreach ( $this->seed_definitions() as $seed_key => $seed ) {
 			$url = wp_nonce_url(
 				admin_url( 'admin-post.php?action=wkf_seed&preset=' . $seed_key ),
@@ -820,6 +809,7 @@ final class Webklient_Forms {
 		echo '<input type="file" name="wkf_import" accept=".json,application/json" required> ';
 		echo '<button type="submit" class="button">Importovat JSON</button>';
 		echo '</form></div>';
+		endif;
 	}
 
 	/** Vytvoření konceptu vlastního formuláře z předlohy. */
@@ -918,23 +908,32 @@ final class Webklient_Forms {
 		}
 		?>
 		<style>
-			#wkf-builder .wkf-def-row { border:1px solid #dcdcde; border-radius:6px; background:#fff; padding:10px 12px; margin-bottom:10px; }
-			#wkf-builder .wkf-def-head { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
-			#wkf-builder .wkf-def-head select { min-width:220px; }
-			#wkf-builder .wkf-def-actions { margin-left:auto; display:flex; gap:4px; }
-			#wkf-builder .wkf-def-extra { margin-top:8px; padding:8px 10px; background:#f6f7f7; border-radius:4px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+			/* Řádek pole: ikona v levém sloupci, obsah odsazený za ní. */
+			#wkf-builder .wkf-def-row { position:relative; border:1px solid #e3e3e5; border-radius:10px; background:#fff; padding:16px 18px 16px 74px; margin-bottom:14px; box-shadow:0 1px 2px rgba(0,0,0,.04); transition:border-color .15s, box-shadow .15s; }
+			#wkf-builder .wkf-def-row:hover { border-color:#c8c8cc; box-shadow:0 2px 8px rgba(0,0,0,.07); }
+			#wkf-builder .wkf-def-row:focus-within { border-color:#960000; box-shadow:0 2px 10px rgba(150,0,0,.10); }
+			#wkf-builder .wkf-def-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px; }
+			#wkf-builder .wkf-def-head select { min-width:200px; border-radius:6px; }
+			#wkf-builder .wkf-def-head label { color:#50575e; }
+			#wkf-builder .wkf-def-label { font-size:15px; padding:8px 12px; border-radius:6px; }
+			#wkf-builder .wkf-def-label::placeholder { color:#a7aaad; font-weight:400; }
+			#wkf-builder .wkf-def-actions { margin-left:auto; display:flex; gap:4px; opacity:.45; transition:opacity .15s; }
+			#wkf-builder .wkf-def-row:hover .wkf-def-actions,
+			#wkf-builder .wkf-def-row:focus-within .wkf-def-actions { opacity:1; }
+			#wkf-builder .wkf-def-actions .button { padding:0 8px; line-height:26px; height:28px; border-radius:6px; }
+			#wkf-builder .wkf-def-extra { margin-top:10px; padding:10px 12px; background:#fafafa; border:1px solid #f0f0f1; border-radius:8px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
 			#wkf-builder .wkf-def-extra[hidden], #wkf-builder [data-x][hidden] { display:none; }
 			#wkf-builder .wkf-def-options { margin-top:8px; }
 			#wkf-builder .wkf-def-options[hidden] { display:none; }
 			#wkf-builder .wkf-def-slug { width:180px; }
 			#wkf-builder .wkf-def-maxmb { width:70px; }
-			#wkf-builder .wkf-def-is-break { border-left:5px solid #960000; background:#fff8f8; margin-top:18px; }
+			#wkf-builder .wkf-def-is-break { border-left:5px solid #960000; background:#fff8f8; margin-top:24px; }
 			#wkf-builder .wkf-def-is-break::before { content:attr(data-step-label); display:block; font-weight:700; color:#960000; margin-bottom:6px; }
 			#wkf-builder .wkf-def-pagebreak-opts { margin-top:8px; color:#50575e; }
 			#wkf-builder .wkf-def-pagebreak-opts[hidden] { display:none; }
 			#wkf-builder .wkf-def-req-wrap[hidden], #wkf-builder .wkf-def-half-wrap[hidden] { display:none; }
-			#wkf-builder .wkf-def-icon { display:inline-flex; width:30px; height:30px; flex:0 0 auto; align-items:center; justify-content:center; border-radius:6px; background:#f6f7f7; color:#960000; }
-			#wkf-builder .wkf-def-icon svg { width:18px; height:18px; display:block; }
+			#wkf-builder .wkf-def-icon { position:absolute; left:16px; top:16px; display:inline-flex; width:42px; height:42px; align-items:center; justify-content:center; border-radius:10px; background:rgba(150,0,0,.07); color:#960000; }
+			#wkf-builder .wkf-def-icon svg { width:24px; height:24px; display:block; }
 			#wkf-builder .wkf-def-adv { margin-top:8px; border-top:1px solid #f0f0f1; padding-top:4px; }
 			#wkf-builder .wkf-def-adv[hidden] { display:none; }
 			#wkf-builder .wkf-def-adv > summary { cursor:pointer; color:#50575e; font-size:12px; padding:3px 0; list-style:none; display:inline-flex; align-items:center; gap:6px; }
@@ -3276,9 +3275,9 @@ final class Webklient_Forms {
 		if ( ! $ours || get_user_meta( get_current_user_id(), '_wkf_research_dismissed', true ) || $this->research_tool_present() ) {
 			return;
 		}
-		$nonce = wp_create_nonce( 'wkf_dismiss_research' );
-		echo '<div class="notice notice-info is-dismissible" id="wkf-research-notice"><p><strong>Webklient Forms je zdarma a pod licencí MIT.</strong> Když chcete tvůrcům oplatit, zapojte web do akademického výzkumu Slezské univerzity o tom, jak generativní AI čte české weby – dozvíte se, kteří roboti AI k vám chodí a kolik lidí přijde z odpovědí AI systémů. Je to <em>samostatný</em> plugin se souhlasem a vlastním poučením; Webklient Forms sám nic neodesílá. <a href="https://geo.kubicek.ai/spoluprace/" target="_blank" rel="noopener">Podrobnosti a zapojení →</a></p>';
-		echo '<script>(function(){var n=document.getElementById("wkf-research-notice");n&&n.addEventListener("click",function(e){if(!e.target.classList.contains("notice-dismiss"))return;var d=new FormData();d.append("action","wkf_dismiss_research");d.append("nonce","' . $nonce . '");fetch(ajaxurl,{method:"POST",credentials:"same-origin",body:d});});})();</script></div>';
+
+		echo '<div class="notice notice-info" id="wkf-research-notice"><p><strong>Webklient Forms je zdarma a pod licencí MIT.</strong> Když chcete tvůrcům oplatit, zapojte web do akademického výzkumu Slezské univerzity o tom, jak generativní AI čte české weby – dozvíte se, kteří roboti AI k vám chodí a kolik lidí přijde z odpovědí AI systémů. Je to <em>samostatný</em> plugin se souhlasem a vlastním poučením; Webklient Forms sám nic neodesílá. <a href="https://geo.kubicek.ai/spoluprace/" target="_blank" rel="noopener">Podrobnosti a zapojení →</a></p>';
+		echo '</div>';
 	}
 
 	public function dismiss_research_notice() {
@@ -3477,12 +3476,16 @@ final class Webklient_Forms {
 
 	/** Blok s ovládáním migrace ve výpisu záznamů (dávkově přes AJAX). */
 	private function render_migration_box() {
+		if ( get_option( 'wkf_hide_migration_box' ) ) {
+			return;
+		}
 		global $wpdb;
 		$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}wpforms_entries" );
 		$state = get_option( 'wkf_migration_state', array() );
 		$state = is_array( $state ) ? $state : array();
 		$nonce = wp_create_nonce( 'wkf_migrate' );
-		echo '<div class="notice" style="padding:12px;border-left-color:#960000;" id="wkf-migration">';
+		echo '<div class="notice" style="padding:12px;border-left-color:#960000;position:relative;" id="wkf-migration">';
+		echo '<a href="' . esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_box&wkf_box=migration&wkf_show=0' ), 'wkf_toggle_box' ) ) . '" style="position:absolute;right:10px;top:10px;text-decoration:none;color:#787c82;" title="Skrýt nabídku migrace – vrátíte ji v nastavení">Skrýt ✕</a>';
 		echo '<strong>Migrace záznamů z WPForms:</strong> v tabulkách WPForms je ' . $total . ' záznamů. ';
 		echo '<button type="button" class="button" data-wkf-migrate="dry">Spustit nanečisto</button> ';
 		echo '<button type="button" class="button button-primary" data-wkf-migrate="live">' . ( ! empty( $state['cursor'] ) && empty( $state['done'] ) ? 'Pokračovat v ostrém běhu' : 'Spustit ostrý běh' ) . '</button> ';
@@ -3666,14 +3669,18 @@ step();});})();</script></div>';
 			}
 
 			$display  = ! empty( $values['jmeno'] ) ? $values['jmeno'] : ( ! empty( $values['email'] ) ? $values['email'] : '' );
-			$date     = $entry['date'] ? $entry['date'] : current_time( 'mysql' );
-			$entry_id = wp_insert_post(
+			// WPForms drží datum odeslání v UTC. Do post_date patří místní čas webu,
+			// jinak by se záznamy ve výpisu ukazovaly posunuté o časový pos
+			// (např. 18:25 místo 20:25).
+			$date_gmt   = $entry['date'] ? $entry['date'] : current_time( 'mysql', true );
+			$date_local = get_date_from_gmt( $date_gmt );
+			$entry_id   = wp_insert_post(
 				array(
 					'post_type'     => self::CPT_ENTRY,
 					'post_status'   => 'publish',
-					'post_title'    => sprintf( '%s – %s – %s', $target->post_title, $display, wp_date( 'j. n. Y H:i', strtotime( $date ) ) ),
-					'post_date'     => $date,
-					'post_date_gmt' => get_gmt_from_date( $date ),
+					'post_title'    => sprintf( '%s – %s – %s', $target->post_title, $display, mysql2date( 'j. n. Y H:i', $date_local ) ),
+					'post_date'     => $date_local,
+					'post_date_gmt' => $date_gmt,
 				),
 				true
 			);
@@ -3935,6 +3942,28 @@ step();});})();</script></div>';
 			echo '<option value="' . esc_attr( $type ) . '" ' . selected( $current, $type, false ) . '>' . esc_html( $schema['name'] ) . '</option>';
 		}
 		echo '</select>';
+
+		// Export celého výpisu patří k filtrům – vybrané záznamy se exportují
+		// přes hromadné akce. Vykreslí se jen jednou, u horní lišty.
+		static $export_links_done = false;
+		if ( $export_links_done || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$export_links_done = true;
+		$filter_args       = array();
+		foreach ( array( 'wkf_form_filter', 'm', 's' ) as $carry ) {
+			if ( ! empty( $_GET[ $carry ] ) ) {
+				$filter_args[ $carry ] = sanitize_text_field( wp_unslash( $_GET[ $carry ] ) );
+			}
+		}
+		$base = add_query_arg( $filter_args, admin_url( 'admin-post.php?action=wkf_export_entries' ) );
+		$hint = $filter_args ? 'Exportovat záznamy podle nastaveného filtru' : 'Exportovat všechny záznamy';
+		echo '<span style="margin-left:8px;">Export výpisu: ';
+		echo '<a href="' . esc_url( wp_nonce_url( add_query_arg( 'format', 'csv', $base ), 'wkf_export_entries' ) ) . '" title="' . esc_attr( $hint ) . '">CSV</a>';
+		if ( class_exists( 'ZipArchive' ) ) {
+			echo ' | <a href="' . esc_url( wp_nonce_url( add_query_arg( 'format', 'xlsx', $base ), 'wkf_export_entries' ) ) . '" title="' . esc_attr( $hint ) . '">XLSX</a>';
+		}
+		echo '</span>';
 	}
 
 	public function entries_filter_query( $query ) {
@@ -3947,6 +3976,41 @@ step();});})();</script></div>';
 				array( array( 'key' => '_wkf_form_type', 'value' => sanitize_key( $_GET['wkf_form_filter'] ) ) )
 			);
 		}
+	}
+
+	/** Export vybraných záznamů přímo z nabídky hromadných akcí. */
+	public function entries_bulk_actions( $actions ) {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return $actions;
+		}
+		$actions['wkf_export_csv'] = 'Exportovat do CSV';
+		if ( class_exists( 'ZipArchive' ) ) {
+			$actions['wkf_export_xlsx'] = 'Exportovat do XLSX';
+		}
+		return $actions;
+	}
+
+	/** Vybrané záznamy se rovnou stočí do souboru; stránka se už nepřekresluje. */
+	public function handle_entries_bulk_export( $redirect, $action, $post_ids ) {
+		if ( 'wkf_export_csv' !== $action && 'wkf_export_xlsx' !== $action ) {
+			return $redirect;
+		}
+		if ( ! current_user_can( 'manage_options' ) || ! $post_ids ) {
+			return add_query_arg( 'wkf_export', 'empty', $redirect );
+		}
+		$entries = get_posts(
+			array(
+				'post_type'      => self::CPT_ENTRY,
+				'post_status'    => 'any',
+				'post__in'       => array_map( 'absint', $post_ids ),
+				'posts_per_page' => -1,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+			)
+		);
+		nocache_headers();
+		$this->export_entries_stream( $entries, 'wkf_export_xlsx' === $action ? 'xlsx' : 'csv' );
+		exit;
 	}
 
 	/** Export záznamů do CSV nebo XLSX – respektuje aktuální filtr výpisu. */
@@ -3975,8 +4039,11 @@ step();});})();</script></div>';
 		if ( ! empty( $_GET['s'] ) ) {
 			$args['s'] = sanitize_text_field( wp_unslash( $_GET['s'] ) );
 		}
-		$entries = get_posts( $args );
+		$this->export_entries_stream( get_posts( $args ), $format );
+	}
 
+	/** Sestaví soubor exportu ze zadaných záznamů a odešle ho prohlížeči. */
+	private function export_entries_stream( $entries, $format ) {
 		// Sloupce: pevný kontext + sjednocení všech popisků polí napříč záznamy
 		// (v pořadí prvního výskytu).
 		$field_columns = array();
@@ -4771,9 +4838,21 @@ step();});})();</script></div>';
 				</details>
 				<?php endif; ?>
 
-				<?php if ( get_option( 'wkf_hide_wpforms_import' ) ) : ?>
-					<p class="description">Blok <strong>Import z WPForms</strong> je v přehledu formulářů skrytý.
-					<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_import&wkf_show=1' ), 'wkf_toggle_import' ) ); ?>">Zobrazit ho znovu</a></p>
+				<?php
+				$hidden_boxes = array();
+				foreach ( $this->hideable_boxes() as $box_key => $box ) {
+					if ( get_option( $box['option'] ) ) {
+						$hidden_boxes[ $box_key ] = $box;
+					}
+				}
+				if ( $hidden_boxes ) :
+					?>
+					<p class="description">Skryté nápovědné bloky:
+					<?php foreach ( $hidden_boxes as $box_key => $box ) : ?>
+						<strong><?php echo esc_html( $box['label'] ); ?></strong> (<?php echo esc_html( $box['where'] ); ?>)
+						<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_toggle_box&wkf_box=' . $box_key . '&wkf_show=1' ), 'wkf_toggle_box' ) ); ?>">zobrazit znovu</a><?php echo count( $hidden_boxes ) > 1 ? ' &nbsp;' : ''; ?>
+					<?php endforeach; ?>
+					</p>
 				<?php endif; ?>
 
 				<div class="wkf-settings-bottom-space"></div>
@@ -6779,17 +6858,29 @@ step();});})();</script></div>';
 		$this->current_mail = array();
 	}
 
-	/** Skrytí nebo opětovné zobrazení bloku importu z WPForms. */
-	public function toggle_import_box() {
+	/** Nápovědné bloky administrace, které si jde schovat. */
+	private function hideable_boxes() {
+		return array(
+			'import'    => array( 'option' => 'wkf_hide_wpforms_import', 'label' => 'Import z WPForms', 'where' => 'v přehledu formulářů' ),
+			'seed'      => array( 'option' => 'wkf_hide_seed_box', 'label' => 'Založit z předlohy', 'where' => 'v přehledu formulářů' ),
+			'migration' => array( 'option' => 'wkf_hide_migration_box', 'label' => 'Migrace záznamů z WPForms', 'where' => 've výpisu záznamů' ),
+		);
+	}
+
+	/** Skrytí nebo opětovné zobrazení nápovědného bloku. */
+	public function toggle_admin_box() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( 'Nedostatečná oprávnění.' );
 		}
-		check_admin_referer( 'wkf_toggle_import' );
-		$show = isset( $_GET['wkf_show'] ) && '1' === $_GET['wkf_show'];
-		if ( $show ) {
-			delete_option( 'wkf_hide_wpforms_import' );
-		} else {
-			update_option( 'wkf_hide_wpforms_import', '1' );
+		check_admin_referer( 'wkf_toggle_box' );
+		$boxes = $this->hideable_boxes();
+		$which = isset( $_GET['wkf_box'] ) ? sanitize_key( $_GET['wkf_box'] ) : '';
+		if ( isset( $boxes[ $which ] ) ) {
+			if ( isset( $_GET['wkf_show'] ) && '1' === $_GET['wkf_show'] ) {
+				delete_option( $boxes[ $which ]['option'] );
+			} else {
+				update_option( $boxes[ $which ]['option'], '1' );
+			}
 		}
 		$back = wp_get_referer();
 		wp_safe_redirect( $back ? $back : admin_url( 'edit.php?post_type=' . self::CPT_FORM ) );
@@ -6952,7 +7043,7 @@ step();});})();</script></div>';
 				<?php else : ?>
 					<?php foreach ( $rows as $row ) : ?>
 						<tr>
-							<td><?php echo esc_html( wp_date( 'j. n. Y H:i', strtotime( $row->created_at ) ) ); ?></td>
+							<td><?php echo esc_html( mysql2date( 'j. n. Y H:i', $row->created_at ) ); ?></td>
 							<td><?php echo 'sent' === $row->status
 								? '<span style="color:#008a20;">odesláno</span>'
 								: '<span style="color:#d63638;font-weight:600;">selhalo</span>'; ?></td>
