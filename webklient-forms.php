@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Univerzální náhrada WPForms Pro pro weby Webklient.cz. Čtyři vestavěné formuláře – kontakt, poptávka služeb, kariéra a obecná poptávka – vkládané shortcodem [wk_form type="..."]. Záznam odeslání, e-mailové notifikace, HTML automatická odpověď s WYSIWYG editorem, Cloudflare Turnstile, kontrolní otázka, honeypot, přesměrování na děkovací stránku a nastavitelný styl tlačítka.
- * Version:           2.4.3
+ * Version:           2.4.4
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -39,7 +39,7 @@ if ( defined( 'WKF_VERSION' ) ) {
 	return;
 }
 
-define( 'WKF_VERSION', '2.4.3' );
+define( 'WKF_VERSION', '2.4.4' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -4547,6 +4547,28 @@ step();});})();</script></div>';
 
 				<?php submit_button( 'Uložit nastavení' ); ?>
 			</form>
+			<script>
+			(function(){
+				// Výsledek testu SMTP i kontroly aktualizace se nese v adrese stránky.
+				// Po zobrazení se z ní odstraní, aby obnovení stránky, tlačítko zpět ani
+				// obnovená záložka neukazovaly starý výsledek jako aktuální.
+				if ( ! window.history || ! window.history.replaceState || ! window.URL ) {
+					return;
+				}
+				var url   = new URL( window.location.href ),
+					keys  = [ 'wkf_smtp_test', 'wkf_smtp_to', 'wkf_smtp_reason', 'wkf_smtp_used', 'wkf_update' ],
+					dirty = false;
+				keys.forEach( function ( key ) {
+					if ( url.searchParams.has( key ) ) {
+						url.searchParams.delete( key );
+						dirty = true;
+					}
+				} );
+				if ( dirty ) {
+					window.history.replaceState( null, '', url.toString() );
+				}
+			})();
+			</script>
 		</div>
 		<?php
 	}
