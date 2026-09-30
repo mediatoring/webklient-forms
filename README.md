@@ -69,12 +69,16 @@ pro okamžitou kontrolu. Předběžná vydání (pre-release) se nenabízejí.
 
 ### Vydání nové verze
 
-1. Zvyšte `Version:` v hlavičce `webklient-forms.php` i konstantu `WKF_VERSION`.
-2. Vytvořte řádné vydání (ne pre-release) s tagem `v2.4.0` nebo `2.4.0` –
-   číslo musí odpovídat hlavičce.
-3. Volitelně přiložte ZIP se složkou `webklient-forms/`; jinak se použije
-   zdrojový archiv, složku si plugin při instalaci sám pojmenuje správně.
-4. Popis vydání se zobrazí jako seznam změn v okně „Zobrazit podrobnosti".
+Stačí zvýšit `Version:` v hlavičce `webklient-forms.php` a změnu dostat do větve
+`main`. Druhé místo s číslem už neexistuje – konstanta `WKF_VERSION` se čte
+z hlavičky, takže se čísla nemohou rozejít.
+
+O zbytek se postará workflow `.github/workflows/release.yml`: při každém push
+do `main` přečte verzi, a není-li pro ni ještě vydání, sestaví ZIP se složkou
+`webklient-forms/` a publikuje řádné vydání s tagem `v<verze>` a popisem změn
+z commitů. Když vydání pro danou verzi už existuje, workflow neudělá nic,
+opakovaný push tedy ničemu nevadí. Popis vydání se pak ukazuje jako seznam
+změn v okně „Zobrazit podrobnosti“ u aktualizace.
 
 ## Soukromí
 
