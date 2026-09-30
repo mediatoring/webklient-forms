@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Univerzální náhrada WPForms Pro pro weby Webklient.cz. Čtyři vestavěné formuláře – kontakt, poptávka služeb, kariéra a obecná poptávka – vkládané shortcodem [wk_form type="..."]. Záznam odeslání, e-mailové notifikace, HTML automatická odpověď s WYSIWYG editorem, Cloudflare Turnstile, kontrolní otázka, honeypot, přesměrování na děkovací stránku a nastavitelný styl tlačítka.
- * Version:           2.4.5
+ * Version:           2.4.6
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -39,7 +39,7 @@ if ( defined( 'WKF_VERSION' ) ) {
 	return;
 }
 
-define( 'WKF_VERSION', '2.4.5' );
+define( 'WKF_VERSION', '2.4.6' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -3726,7 +3726,35 @@ step();});})();</script></div>';
 		}
 		echo '</ul>';
 
-		echo '<p style="margin:10px 0 0;"><a href="' . esc_url( admin_url( 'edit.php?post_type=' . self::CPT_ENTRY ) ) . '">Všechny záznamy →</a></p>';
+		// Poslední záznam – jedním kliknutím na to, co přišlo naposled.
+		$all_url = admin_url( 'edit.php?post_type=' . self::CPT_ENTRY );
+		$latest  = get_posts(
+			array(
+				'post_type'      => self::CPT_ENTRY,
+				'post_status'    => 'any',
+				'posts_per_page' => 1,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+				'no_found_rows'  => true,
+			)
+		);
+		echo '<p style="margin:10px 0 0;border-top:1px solid #f0f0f1;padding-top:8px;">';
+		if ( $latest ) {
+			$last      = $latest[0];
+			$last_link = get_edit_post_link( $last->ID );
+			$last_name = mb_strimwidth( wp_strip_all_tags( get_the_title( $last ) ), 0, 52, '…' );
+			$ago       = human_time_diff( strtotime( $last->post_date_gmt . ' GMT' ), time() );
+			echo 'Poslední záznam: ';
+			if ( $last_link ) {
+				echo '<a href="' . esc_url( $last_link ) . '">' . esc_html( $last_name ) . '</a>';
+			} else {
+				echo esc_html( $last_name );
+			}
+			echo ' <span style="color:#787c82;">(před ' . esc_html( $ago ) . ')</span><br>';
+		} else {
+			echo '<span style="color:#787c82;">Zatím nedorazil žádný záznam.</span><br>';
+		}
+		echo '<a href="' . esc_url( $all_url ) . '">Všechny záznamy →</a></p>';
 	}
 
 	/** Filtr výpisu záznamů podle formuláře. */
