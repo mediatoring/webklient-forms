@@ -4201,7 +4201,7 @@ step();});})();</script></div>';
 						<?php if ( $s['smtp_mode'] && $s['smtp_host'] ) : ?>
 							<input type="email" id="wkf_smtp_test_to" class="regular-text" value="<?php echo esc_attr( wp_get_current_user()->user_email ); ?>" placeholder="adresa, kam test odejít" autocomplete="off">
 							&nbsp;<a id="wkf_smtp_test_btn" href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_smtp_test' ), 'wkf_smtp_test' ) ); ?>" class="button">Odeslat testovací e-mail</a>
-							<p class="description">Test se odesílá podle <strong>uloženého</strong> nastavení – pokud jste údaje právě měnili, nejdřív nastavení uložte. Prázdné pole = test půjde na adresu přihlášeného uživatele.</p>
+							<p class="description">Test se odesílá podle <strong>uloženého</strong> nastavení – pokud jste údaje právě měnili, nejdřív nastavení uložte. Prázdné pole = test půjde na adresu přihlášeného uživatele. Když server přihlášení přijme, ale odeslat odmítne, bývá na vině <strong>e-mail odesílatele</strong> v sekci výše – musí patřit k tomu SMTP účtu nebo být jeho povolený alias.</p>
 						<?php else : ?>
 							<p class="description">Test bude k dispozici po uložení režimu a adresy SMTP serveru.</p>
 						<?php endif; ?>
@@ -6376,8 +6376,11 @@ step();});})();</script></div>';
 			$phpmailer->SMTPSecure  = '';
 			$phpmailer->SMTPAutoTLS = false;
 		}
-		if ( $s['sender_email'] && is_email( $s['sender_email'] ) ) {
-			$phpmailer->setFrom( $s['sender_email'], $s['sender_name'] ? $s['sender_name'] : 'WordPress', false );
+		// Odesílatel ze sekce „Odesílatel e-mailů“ – bez něj by zůstala výchozní adresa
+		// WordPressu (wordpress@doména), kterou většina SMTP serverů odmítne.
+		if ( ! empty( $s['from_email'] ) && is_email( $s['from_email'] ) ) {
+			$phpmailer->setFrom( $s['from_email'], $s['from_name'] ? $s['from_name'] : 'WordPress', false );
+			$phpmailer->Sender = $s['from_email'];
 		}
 	}
 
@@ -6393,12 +6396,24 @@ step();});})();</script></div>';
 		if ( ! $to || ! is_email( $to ) ) {
 			$to = $user->user_email;
 		}
+		$s       = $this->get_settings();
+		$headers = array();
+		if ( ! empty( $s['from_email'] ) && is_email( $s['from_email'] ) ) {
+			$headers[] = sprintf( 'From: %s <%s>', $s['from_name'], $s['from_email'] );
+		}
+		$body = "Tento e-mail ověřuje nastavení SMTP odesílání v pluginu Webklient Forms.\n\n"
+			. 'Server: ' . $s['smtp_host'] . ':' . $s['smtp_port'] . ' (' . ( $s['smtp_secure'] ? strtoupper( $s['smtp_secure'] ) : 'bez šifrování' ) . ")\n"
+			. 'Přihlášení: ' . ( $s['smtp_user'] ? $s['smtp_user'] : 'bez autentizace' ) . "\n"
+			. 'Odesílatel: ' . ( ! empty( $s['from_email'] ) ? $s['from_email'] : 'výchozí WordPressu' ) . "\n"
+			. 'Odesláno: ' . wp_date( 'j. n. Y H:i:s' );
+
 		$this->last_mail_error   = '';
 		$this->sending_form_mail = true;
 		$sent = wp_mail(
 			$to,
 			'Webklient Forms – test SMTP (' . wp_parse_url( home_url(), PHP_URL_HOST ) . ')',
-			"Tento e-mail ověřuje nastavení SMTP odesílání v pluginu Webklient Forms.\n\nOdesláno: " . wp_date( 'j. n. Y H:i:s' )
+			$body,
+			$headers
 		);
 		$this->sending_form_mail = false;
 
