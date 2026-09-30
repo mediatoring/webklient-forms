@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name:       Webklient Forms
- * Description:       Univerzální náhrada WPForms Pro pro weby Webklient.cz. Čtyři vestavěné formuláře – kontakt, poptávka služeb, kariéra a obecná poptávka – vkládané shortcodem [wk_form type="..."]. Záznam odeslání, e-mailové notifikace, HTML automatická odpověď s WYSIWYG editorem, Cloudflare Turnstile, kontrolní otázka, honeypot, přesměrování na děkovací stránku a nastavitelný styl tlačítka.
- * Version:           2.4.6
+ * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
+ * Version:           2.5.0
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -39,7 +39,7 @@ if ( defined( 'WKF_VERSION' ) ) {
 	return;
 }
 
-define( 'WKF_VERSION', '2.4.6' );
+define( 'WKF_VERSION', '2.5.0' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WKF_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -61,6 +61,13 @@ final class Webklient_Forms {
 
 	/** S čím PHPMailer skutečně odesílal – pro diagnostiku testovacího e-mailu. */
 	private $last_mail_debug = '';
+
+	/** Argumenty právě odesílaného wp_mail (pro zápis do logu pošty). */
+	private $current_mail = array();
+
+	/** Přenos a odesílatel právě odesílané zprávy, získané z PHPMaileru. */
+	private $current_mail_transport = '';
+	private $current_mail_from      = '';
 
 	/** Soubory nahrané v právě zpracovávaném odeslání (pro přílohy notifikace). */
 	private $current_uploads = array();
@@ -125,6 +132,10 @@ final class Webklient_Forms {
 		// Záměrně úplně poslední v řadě: zaznamená i to, co po nás přepsal jiný plugin.
 		add_action( 'phpmailer_init', array( $this, 'capture_mail_debug' ), PHP_INT_MAX );
 		add_action( 'wp_mail_failed', array( $this, 'capture_mail_error' ) );
+		add_filter( 'wp_mail', array( $this, 'mail_log_capture_args' ) );
+		add_action( 'wp_mail_succeeded', array( $this, 'mail_log_success' ) );
+		add_action( 'init', array( $this, 'maybe_create_mail_log_table' ) );
+		add_action( 'admin_post_wkf_mail_log_clear', array( $this, 'mail_log_clear' ) );
 		add_action( 'wkf_webhook_retry', array( $this, 'webhook_dispatch' ) );
 		add_action( 'wkf_daily_retention', array( $this, 'run_retention' ) );
 		add_action( 'init', array( $this, 'schedule_retention' ) );
@@ -361,6 +372,9 @@ final class Webklient_Forms {
 			'smtp_secure'          => 'tls',
 			'smtp_user'            => '',
 			'smtp_pass'            => '',
+			// Log odeslané pošty (náhrada samostatného SMTP loggeru).
+			'mail_log_enabled'     => 1,
+			'mail_log_days'        => 30,
 			// Ověřování odeslaných adres v RÚIAN (ruian.fnx.io, klíč zdarma e-mailem).
 			'fnx_api_key'          => '',
 			// Odesílatel.
@@ -462,6 +476,8 @@ final class Webklient_Forms {
 		} else {
 			$out['smtp_pass'] = isset( $existing['smtp_pass'] ) ? $existing['smtp_pass'] : '';
 		}
+		$out['mail_log_enabled'] = empty( $input['mail_log_enabled'] ) ? 0 : 1;
+		$out['mail_log_days']    = isset( $input['mail_log_days'] ) ? max( 1, min( 365, absint( $input['mail_log_days'] ) ) ) : 30;
 
 		$out['from_name']            = isset( $input['from_name'] ) ? sanitize_text_field( $input['from_name'] ) : '';
 		$out['from_email']           = isset( $input['from_email'] ) ? sanitize_email( $input['from_email'] ) : '';
@@ -4133,6 +4149,7 @@ step();});})();</script></div>';
 		add_menu_page( 'Formuláře', 'Formuláře', 'manage_options', $entries_slug, '', 'dashicons-feedback', 26 );
 		add_submenu_page( $entries_slug, 'Záznamy', 'Záznamy', 'manage_options', $entries_slug );
 		add_submenu_page( $entries_slug, 'Formuláře', 'Formuláře', 'manage_options', 'edit.php?post_type=' . self::CPT_FORM );
+		add_submenu_page( $entries_slug, 'Log e-mailů', 'Log e-mailů', 'manage_options', 'wkf-mail-log', array( $this, 'render_mail_log_page' ) );
 		add_submenu_page( $entries_slug, 'Nastavení', 'Nastavení', 'manage_options', 'wkf-settings', array( $this, 'render_settings_page' ) );
 	}
 
@@ -4250,6 +4267,12 @@ step();});})();</script></div>';
 							<p class="description">Test bude k dispozici po uložení režimu a adresy SMTP serveru.</p>
 						<?php endif; ?>
 						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wkf_mail_log">Log odeslané pošty</label></th>
+						<td><label><input type="checkbox" id="wkf_mail_log" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[mail_log_enabled]" value="1" <?php checked( ! empty( $s['mail_log_enabled'] ) ); ?>> Zaznamenávat každý odeslaný e-mail webu</label>
+						&nbsp;&nbsp;Uchovávat <input type="number" style="width:80px;" min="1" max="365" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[mail_log_days]" value="<?php echo esc_attr( $s['mail_log_days'] ); ?>"> dní
+						<p class="description">Příjemce, předmět, čas, úspěch či důvod selhání a přes jaký server zpráva šla – včetně pošty, kterou posílají jiné pluginy. Obsah zprávy ani přílohy se neukládají. Výpis a graf najdete v <a href="<?php echo esc_url( admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-mail-log' ) ); ?>">Log e-mailů</a>; starší záznamy se každý den samy mažou.</p></td>
 					</tr>
 				</table>
 				<script>
@@ -6259,6 +6282,20 @@ step();});})();</script></div>';
 
 	/** Smaže záznamy starší než doba uchování nastavená u formuláře, včetně souborů. */
 	public function run_retention() {
+		// Úklid logu pošty podle nastavené doby uchování.
+		$settings = $this->get_settings();
+		$log_days = (int) $settings['mail_log_days'];
+		if ( $log_days > 0 ) {
+			global $wpdb;
+			$log_table = $this->mail_log_table();
+			$wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM `{$log_table}` WHERE created_at < %s",
+					wp_date( 'Y-m-d H:i:s', strtotime( '-' . $log_days . ' days' ) )
+				)
+			);
+		}
+
 		$forms = get_posts( array( 'post_type' => self::CPT_FORM, 'post_status' => 'any', 'posts_per_page' => -1 ) );
 		foreach ( $forms as $form ) {
 			$days = (int) get_post_meta( $form->ID, '_wkf_retention', true );
@@ -6411,9 +6448,7 @@ step();});})();</script></div>';
 	/** Uloží důvod selhání e-mailu (WordPress ho jinak zahodí). */
 	/** Zaznamená skutečnou konfiguraci PHPMaileru těsně před odesláním. */
 	public function capture_mail_debug( $phpmailer ) {
-		if ( ! $this->sending_form_mail ) {
-			return;
-		}
+		$this->current_mail_from = (string) $phpmailer->From;
 		if ( 'smtp' === strtolower( (string) $phpmailer->Mailer ) ) {
 			$transport = 'SMTP ' . $phpmailer->Host . ':' . $phpmailer->Port
 				. ( $phpmailer->SMTPSecure ? ' ' . strtoupper( (string) $phpmailer->SMTPSecure ) : ' bez šifrování' )
@@ -6421,13 +6456,18 @@ step();});})();</script></div>';
 		} else {
 			$transport = 'funkce mail() serveru – SMTP se vůbec nepoužilo';
 		}
-		$this->last_mail_debug = 'odesílatel ' . $phpmailer->From . ' (' . $transport . ')';
+		$this->current_mail_transport = $transport;
+		if ( $this->sending_form_mail ) {
+			$this->last_mail_debug = 'odesílatel ' . $phpmailer->From . ' (' . $transport . ')';
+		}
 	}
 
 	public function capture_mail_error( $wp_error ) {
-		if ( $this->sending_form_mail && is_wp_error( $wp_error ) ) {
-			$this->last_mail_error = $wp_error->get_error_message();
+		$message = is_wp_error( $wp_error ) ? $wp_error->get_error_message() : '';
+		if ( $this->sending_form_mail ) {
+			$this->last_mail_error = $message;
 		}
+		$this->mail_log_write( 'failed', $message );
 	}
 
 	/** Nastaví PHPMailer podle SMTP konfigurace pluginu. */
@@ -6465,6 +6505,284 @@ step();});})();</script></div>';
 			$phpmailer->setFrom( $s['from_email'], $s['from_name'] ? $s['from_name'] : 'WordPress', false );
 			$phpmailer->Sender = $s['from_email'];
 		}
+	}
+
+	/* =========================================================
+	 * Log odeslané pošty
+	 * ======================================================= */
+
+	private function mail_log_table() {
+		global $wpdb;
+		return $wpdb->prefix . 'wkf_mail_log';
+	}
+
+	/** Založí tabulku logu; po prvním vytvoření se jen přeskočí podle volby. */
+	public function maybe_create_mail_log_table() {
+		if ( '1' === get_option( 'wkf_mail_log_db', '' ) ) {
+			return;
+		}
+		global $wpdb;
+		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+		$table   = $this->mail_log_table();
+		$collate = $wpdb->get_charset_collate();
+		dbDelta(
+			"CREATE TABLE {$table} (
+				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+				created_at datetime NOT NULL,
+				status varchar(10) NOT NULL DEFAULT 'sent',
+				to_email text NOT NULL,
+				subject text NOT NULL,
+				from_email varchar(190) NOT NULL DEFAULT '',
+				transport varchar(190) NOT NULL DEFAULT '',
+				source varchar(20) NOT NULL DEFAULT 'site',
+				error text NOT NULL,
+				PRIMARY KEY  (id),
+				KEY created_at (created_at),
+				KEY status (status)
+			) {$collate};"
+		);
+		update_option( 'wkf_mail_log_db', '1' );
+	}
+
+	/** Zapamatuje si argumenty právě odesílaného wp_mail. */
+	public function mail_log_capture_args( $args ) {
+		$this->current_mail           = is_array( $args ) ? $args : array();
+		$this->current_mail_transport = '';
+		$this->current_mail_from      = '';
+		return $args;
+	}
+
+	/** Úspěšné odeslání (hook wp_mail_succeeded, WordPress 5.9 a novější). */
+	public function mail_log_success( $mail_data ) {
+		if ( is_array( $mail_data ) && ! $this->current_mail ) {
+			$this->current_mail = $mail_data;
+		}
+		$this->mail_log_write( 'sent' );
+	}
+
+	/** Jeden řádek logu. Volá se z hooků úspěchu i selhání. */
+	private function mail_log_write( $status, $error = '' ) {
+		$s = $this->get_settings();
+		if ( empty( $s['mail_log_enabled'] ) || ! $this->current_mail ) {
+			$this->current_mail = array();
+			return;
+		}
+		global $wpdb;
+		$to      = isset( $this->current_mail['to'] ) ? $this->current_mail['to'] : '';
+		$to      = is_array( $to ) ? implode( ', ', $to ) : (string) $to;
+		$subject = isset( $this->current_mail['subject'] ) ? (string) $this->current_mail['subject'] : '';
+
+		$wpdb->insert(
+			$this->mail_log_table(),
+			array(
+				'created_at' => current_time( 'mysql' ),
+				'status'     => 'sent' === $status ? 'sent' : 'failed',
+				'to_email'   => mb_strimwidth( $to, 0, 500, '…' ),
+				'subject'    => mb_strimwidth( $subject, 0, 500, '…' ),
+				'from_email' => mb_strimwidth( $this->current_mail_from, 0, 190, '…' ),
+				'transport'  => mb_strimwidth( $this->current_mail_transport, 0, 190, '…' ),
+				'source'     => $this->sending_form_mail ? 'form' : 'site',
+				'error'      => mb_strimwidth( (string) $error, 0, 500, '…' ),
+			),
+			array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' )
+		);
+		$this->current_mail = array();
+	}
+
+	/** Vyprázdnění logu z administrace. */
+	public function mail_log_clear() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Nedostatečná oprávnění.' );
+		}
+		check_admin_referer( 'wkf_mail_log_clear' );
+		global $wpdb;
+		$table = $this->mail_log_table();
+		$wpdb->query( "TRUNCATE TABLE `{$table}`" );
+		wp_safe_redirect( add_query_arg( 'wkf_log', 'cleared', admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-mail-log' ) ) );
+		exit;
+	}
+
+	/** Počty odeslaných a neúspěšných e-mailů po dnech za zadané období. */
+	private function mail_log_stats( $days ) {
+		global $wpdb;
+		$table = $this->mail_log_table();
+		$per_day = array();
+		for ( $i = $days - 1; $i >= 0; $i-- ) {
+			$per_day[ wp_date( 'Y-m-d', strtotime( '-' . $i . ' days' ) ) ] = array( 'sent' => 0, 'failed' => 0 );
+		}
+		$since = wp_date( 'Y-m-d', strtotime( '-' . ( $days - 1 ) . ' days' ) ) . ' 00:00:00';
+		$rows  = $wpdb->get_results(
+			$wpdb->prepare( "SELECT DATE(created_at) AS den, status, COUNT(*) AS pocet FROM `{$table}` WHERE created_at >= %s GROUP BY den, status", $since )
+		);
+		foreach ( (array) $rows as $row ) {
+			if ( isset( $per_day[ $row->den ][ $row->status ] ) ) {
+				$per_day[ $row->den ][ $row->status ] = (int) $row->pocet;
+			}
+		}
+		return $per_day;
+	}
+
+	/** Sloupcový graf odeslané pošty (SVG, bez závislostí). */
+	private function mail_log_chart( $per_day ) {
+		$s      = $this->get_settings();
+		$color  = $s['btn_bg'] ? $s['btn_bg'] : '#960000';
+		$width  = 720;
+		$height = 120;
+		$count  = max( 1, count( $per_day ) );
+		$slot   = $width / $count;
+		$bar    = max( 3, $slot - ( $count > 14 ? 2 : 8 ) );
+		$max    = 1;
+		foreach ( $per_day as $d ) {
+			$max = max( $max, $d['sent'] + $d['failed'] );
+		}
+
+		echo '<svg viewBox="0 0 ' . $width . ' ' . $height . '" width="100%" height="140" preserveAspectRatio="none" role="img" aria-label="Odeslané e-maily po dnech">';
+		$x = 0;
+		foreach ( $per_day as $day => $d ) {
+			$total    = $d['sent'] + $d['failed'];
+			$full     = $total ? ( $total / $max ) * ( $height - 12 ) : 0;
+			$fail_h   = $total ? ( $d['failed'] / $total ) * $full : 0;
+			$sent_h   = $full - $fail_h;
+			$bar_x    = $x + ( $slot - $bar ) / 2;
+			$title    = wp_date( 'j. n.', strtotime( $day ) ) . ': odesláno ' . $d['sent'] . ', neúspěšných ' . $d['failed'];
+			echo '<g><title>' . esc_html( $title ) . '</title>';
+			if ( $sent_h > 0 ) {
+				echo '<rect x="' . round( $bar_x, 1 ) . '" y="' . round( $height - $full, 1 ) . '" width="' . round( $bar, 1 ) . '" height="' . round( $sent_h, 1 ) . '" fill="' . esc_attr( $color ) . '"/>';
+			}
+			if ( $fail_h > 0 ) {
+				echo '<rect x="' . round( $bar_x, 1 ) . '" y="' . round( $height - $fail_h, 1 ) . '" width="' . round( $bar, 1 ) . '" height="' . round( $fail_h, 1 ) . '" fill="#d63638"/>';
+			}
+			if ( 0 === $total ) {
+				echo '<rect x="' . round( $bar_x, 1 ) . '" y="' . ( $height - 2 ) . '" width="' . round( $bar, 1 ) . '" height="2" fill="#dcdcde"/>';
+			}
+			echo '</g>';
+			$x += $slot;
+		}
+		echo '</svg>';
+
+		$first = array_keys( $per_day );
+		echo '<div style="display:flex;justify-content:space-between;color:#787c82;font-size:11px;margin-bottom:10px;">';
+		echo '<span>' . esc_html( wp_date( 'j. n.', strtotime( $first[0] ) ) ) . '</span>';
+		echo '<span><span style="display:inline-block;width:10px;height:10px;background:' . esc_attr( $color ) . ';margin-right:4px;"></span>odesláno';
+		echo ' &nbsp;<span style="display:inline-block;width:10px;height:10px;background:#d63638;margin:0 4px 0 8px;"></span>neúspěšné</span>';
+		echo '<span>dnes</span></div>';
+	}
+
+	/** Stránka Log e-mailů: graf, filtr a výpis odeslané pošty. */
+	public function render_mail_log_page() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		global $wpdb;
+		$this->maybe_create_mail_log_table();
+		$table    = $this->mail_log_table();
+		$s        = $this->get_settings();
+		$days     = isset( $_GET['wkf_days'] ) && 30 === (int) $_GET['wkf_days'] ? 30 : 7;
+		$status   = isset( $_GET['wkf_status'] ) && in_array( $_GET['wkf_status'], array( 'sent', 'failed' ), true ) ? $_GET['wkf_status'] : '';
+		$paged    = max( 1, isset( $_GET['paged'] ) ? absint( $_GET['paged'] ) : 1 );
+		$per_page = 25;
+		$base_url = admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-mail-log' );
+
+		if ( $status ) {
+			$total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM `{$table}` WHERE status = %s", $status ) );
+			$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM `{$table}` WHERE status = %s ORDER BY id DESC LIMIT %d OFFSET %d", $status, $per_page, ( $paged - 1 ) * $per_page ) );
+		} else {
+			$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$table}`" );
+			$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM `{$table}` ORDER BY id DESC LIMIT %d OFFSET %d", $per_page, ( $paged - 1 ) * $per_page ) );
+		}
+		$per_day = $this->mail_log_stats( $days );
+		$sum     = array( 'sent' => 0, 'failed' => 0 );
+		foreach ( $per_day as $d ) {
+			$sum['sent']   += $d['sent'];
+			$sum['failed'] += $d['failed'];
+		}
+		?>
+		<div class="wrap">
+			<h1>Log e-mailů</h1>
+			<?php if ( isset( $_GET['wkf_log'] ) && 'cleared' === $_GET['wkf_log'] ) : ?>
+				<div class="notice notice-success inline"><p>Log byl vyprázdněn.</p></div>
+			<?php endif; ?>
+			<?php if ( empty( $s['mail_log_enabled'] ) ) : ?>
+				<div class="notice notice-warning inline"><p>Zaznamenávání pošty je vypnuté v <a href="<?php echo esc_url( admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings#wkf-sec-email' ) ); ?>">nastavení</a>, nové e-maily se do logu nepřidávají.</p></div>
+			<?php endif; ?>
+
+			<div style="background:#fff;border:1px solid #c3c4c7;border-radius:4px;padding:12px 16px;margin:16px 0;">
+				<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+					<strong>Za posledních <?php echo (int) $days; ?> dní: odesláno <?php echo (int) $sum['sent']; ?>, neúspěšných <?php echo (int) $sum['failed']; ?></strong>
+					<span>
+						<?php if ( 7 === $days ) : ?><strong>7 dní</strong><?php else : ?><a href="<?php echo esc_url( add_query_arg( 'wkf_days', 7, $base_url ) ); ?>">7 dní</a><?php endif; ?>
+						|
+						<?php if ( 30 === $days ) : ?><strong>30 dní</strong><?php else : ?><a href="<?php echo esc_url( add_query_arg( 'wkf_days', 30, $base_url ) ); ?>">30 dní</a><?php endif; ?>
+					</span>
+				</div>
+				<?php $this->mail_log_chart( $per_day ); ?>
+			</div>
+
+			<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+				<span>
+					<?php if ( '' === $status ) : ?><strong>Vše</strong><?php else : ?><a href="<?php echo esc_url( add_query_arg( 'wkf_days', $days, $base_url ) ); ?>">Vše</a><?php endif; ?>
+					(<?php echo (int) $total; ?>)
+					|
+					<?php if ( 'sent' === $status ) : ?><strong>Odeslané</strong><?php else : ?><a href="<?php echo esc_url( add_query_arg( array( 'wkf_days' => $days, 'wkf_status' => 'sent' ), $base_url ) ); ?>">Odeslané</a><?php endif; ?>
+					|
+					<?php if ( 'failed' === $status ) : ?><strong>Neúspěšné</strong><?php else : ?><a href="<?php echo esc_url( add_query_arg( array( 'wkf_days' => $days, 'wkf_status' => 'failed' ), $base_url ) ); ?>">Neúspěšné</a><?php endif; ?>
+				</span>
+				<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_mail_log_clear' ), 'wkf_mail_log_clear' ) ); ?>" class="button" onclick="return confirm('Opravdu smazat celý log odeslané pošty?');">Vyprázdnit log</a>
+			</div>
+
+			<table class="widefat striped">
+				<thead><tr>
+					<th style="width:140px;">Čas</th>
+					<th style="width:90px;">Stav</th>
+					<th style="width:200px;">Příjemce</th>
+					<th>Předmět</th>
+					<th style="width:80px;">Zdroj</th>
+					<th style="width:220px;">Odesláno přes</th>
+				</tr></thead>
+				<tbody>
+				<?php if ( ! $rows ) : ?>
+					<tr><td colspan="6">Zatím tu nic není. Jakmile web odešle e-mail, objeví se tady.</td></tr>
+				<?php else : ?>
+					<?php foreach ( $rows as $row ) : ?>
+						<tr>
+							<td><?php echo esc_html( wp_date( 'j. n. Y H:i', strtotime( $row->created_at ) ) ); ?></td>
+							<td><?php echo 'sent' === $row->status
+								? '<span style="color:#008a20;">odesláno</span>'
+								: '<span style="color:#d63638;font-weight:600;">selhalo</span>'; ?></td>
+							<td><?php echo esc_html( $row->to_email ); ?></td>
+							<td><?php echo esc_html( $row->subject ); ?>
+								<?php if ( 'failed' === $row->status && $row->error ) : ?>
+									<br><span style="color:#d63638;">Důvod: <?php echo esc_html( $row->error ); ?></span>
+								<?php endif; ?>
+							</td>
+							<td><?php echo 'form' === $row->source ? 'formulář' : 'web'; ?></td>
+							<td style="color:#787c82;"><?php echo esc_html( $row->transport ? $row->transport : '—' ); ?>
+								<?php if ( $row->from_email ) : ?><br>od <?php echo esc_html( $row->from_email ); ?><?php endif; ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
+				<?php endif; ?>
+				</tbody>
+			</table>
+
+			<?php
+			$pages = (int) ceil( $total / $per_page );
+			if ( $pages > 1 ) {
+				echo '<p style="margin-top:12px;">' . paginate_links(
+					array(
+						'base'      => add_query_arg( 'paged', '%#%', add_query_arg( array( 'wkf_days' => $days, 'wkf_status' => $status ), $base_url ) ),
+						'format'    => '',
+						'current'   => $paged,
+						'total'     => $pages,
+						'prev_text' => '‹',
+						'next_text' => '›',
+					)
+				) . '</p>';
+			}
+			?>
+			<p class="description">Log se sám čistí po <?php echo (int) $s['mail_log_days']; ?> dnech, délku i vypnutí najdete v <a href="<?php echo esc_url( admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' ) ); ?>">nastavení</a>.</p>
+		</div>
+		<?php
 	}
 
 	/** Testovací e-mail přes nastavené SMTP. */

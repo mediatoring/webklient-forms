@@ -37,6 +37,13 @@ vstupní stránka, zdroj, kampaň a cesta po webu před odesláním.
 automatická odpověď odesílateli, SMTP odesílání, webhook do CRM (Lead API)
 s opakováním při výpadku, děkovací stránka nebo vlastní potvrzovací hláška.
 
+**Log pošty.** Každý e-mail, který web odesílá, se zapisuje s časem, příjemcem,
+předmětem, výsledkem a důvodem případného selhání – včetně pošty ostatních
+pluginů. V administraci je výpis s filtrem a graf odeslaných a neúspěšných
+zpráv za 7 nebo 30 dní; starší záznamy se samy mažou. Obsah zpráv ani přílohy
+se neukládají. Zaznamenání úspěšných odeslání vyžaduje WordPress 5.9 a novější,
+selhání se zapisují vždy.
+
 **Ochrana.** Cloudflare Turnstile, kontrolní otázka, honeypot, limit odeslání
 z jedné adresy, kontrola typu nahraných souborů a doba uchování záznamů
 s automatickou skartací.
