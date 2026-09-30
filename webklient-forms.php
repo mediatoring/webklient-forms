@@ -17,6 +17,28 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/*
+ * Pojistka proti dvojí kopii pluginu. Archiv z GitHubu („Download ZIP“) má
+ * složku webklient-forms-main, která se nainstaluje jako samostatný plugin
+ * vedle původní složky webklient-forms. Druhé načtení téže třídy PHP shodí
+ * („Cannot redeclare class“) a WordPress ohlásí jen závažnou chybu. Druhá
+ * kopie se proto raději ohlásí hláškou a skončí. Rozlišuje se podle konstanty,
+ * ne podle třídy – třídu si PHP při kompilaci souboru zaregistruje ještě před
+ * vykonáním těchto řádků, takže class_exists() by hlásil i první kopii.
+ */
+if ( defined( 'WKF_VERSION' ) ) {
+	if ( ! function_exists( 'wkf_duplicate_copy_notice' ) ) {
+		function wkf_duplicate_copy_notice() {
+			if ( ! current_user_can( 'activate_plugins' ) ) {
+				return;
+			}
+			echo '<div class="notice notice-error"><p><strong>Webklient Forms:</strong> na webu jsou dvě kopie pluginu ve dvou složkách – typicky složka rozbalená z GitHubu (<code>webklient-forms-main</code>) vedle původní instalace. Běží jen jedna, druhá nic nedělá. V přehledu Pluginy tu navíc deaktivujte a smažte – správná složka se jmenuje <code>webklient-forms</code>.</p></div>';
+		}
+	}
+	add_action( 'admin_notices', 'wkf_duplicate_copy_notice' );
+	return;
+}
+
 define( 'WKF_VERSION', '2.4.2' );
 define( 'WKF_PLUGIN_FILE', __FILE__ );
 define( 'WKF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
