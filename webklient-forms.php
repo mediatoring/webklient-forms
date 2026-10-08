@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.7
+ * Version:           2.5.8
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -120,6 +120,7 @@ final class Webklient_Forms {
 		// Administrace.
 		add_action( 'admin_menu', array( $this, 'admin_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
+		add_filter( 'auto_update_plugin', array( $this, 'enable_auto_update' ), 10, 2 );
 		add_filter( 'manage_' . self::CPT_ENTRY . '_posts_columns', array( $this, 'entry_columns' ) );
 		add_action( 'manage_' . self::CPT_ENTRY . '_posts_custom_column', array( $this, 'entry_column_content' ), 10, 2 );
 		add_action( 'add_meta_boxes', array( $this, 'entry_meta_box' ) );
@@ -359,6 +360,8 @@ final class Webklient_Forms {
 			'ico_enabled'          => 0,
 			// Našeptávání adres (Mapy.cz Suggest API, klíč z developer.mapy.com).
 			'mapy_api_key'         => '',
+			// Instalovat nová vydání bez čekání na kliknutí.
+			'auto_update'       => 1,
 			// Nenápadný podpis pod formulářem (odkaz na tvůrce webu).
 			'credit'            => 0,
 			// Sledování cesty návštěvníka k poptávce (vstupní stránka, zdroj, kroky).
@@ -457,6 +460,7 @@ final class Webklient_Forms {
 		$out['ico_enabled']          = empty( $input['ico_enabled'] ) ? 0 : 1;
 		$out['mapy_api_key']         = isset( $input['mapy_api_key'] ) ? sanitize_text_field( $input['mapy_api_key'] ) : '';
 		$out['fnx_api_key']          = isset( $input['fnx_api_key'] ) ? sanitize_text_field( $input['fnx_api_key'] ) : '';
+		$out['auto_update']     = empty( $input['auto_update'] ) ? 0 : 1;
 		$out['credit']          = empty( $input['credit'] ) ? 0 : 1;
 		$out['journey_steps']   = isset( $input['journey_steps'] ) ? max( 5, min( 100, absint( $input['journey_steps'] ) ) ) : 30;
 		$out['journey_consent'] = isset( $input['journey_consent'] ) ? sanitize_text_field( $input['journey_consent'] ) : '';
@@ -3401,6 +3405,17 @@ final class Webklient_Forms {
 		return $transient;
 	}
 
+	/** Zapne automatickou instalaci nových vydání tohoto pluginu. */
+	public function enable_auto_update( $update, $item ) {
+		$basename = plugin_basename( WKF_PLUGIN_FILE );
+		if ( ! is_object( $item ) || empty( $item->plugin ) || $basename !== $item->plugin ) {
+			return $update;
+		}
+		// Vypnutá volba nic nevnucuje – rozhodnutí zůstává na přepínači u pluginu.
+		$s = $this->get_settings();
+		return empty( $s['auto_update'] ) ? $update : true;
+	}
+
 	/** Detail aktualizace v okně „Zobrazit podrobnosti". */
 	public function update_plugin_info( $result, $action, $args ) {
 		$basename = plugin_basename( WKF_PLUGIN_FILE );
@@ -4649,6 +4664,11 @@ step();});})();</script></div>';
 					$has_new  = ! empty( $release['version'] ) && version_compare( $release['version'], WKF_VERSION, '>' );
 					$basename = plugin_basename( WKF_PLUGIN_FILE );
 					?>
+					<tr>
+						<th scope="row">Automatické aktualizace</th>
+						<td><label><input type="checkbox" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[auto_update]" value="1" <?php checked( ! empty( $s['auto_update'] ) ); ?>> Instalovat nová vydání sama, bez čekání na kliknutí</label>
+						<p class="description">WordPress novou verzi doinstaluje na svém pravidelném cronu, obvykle do půl dne od vydání. Po vypnutí se aktualizace jen nabídne a rozhodnutí zůstane na přepínači u pluginu v přehledu Pluginy.</p></td>
+					</tr>
 					<tr>
 						<th scope="row">Verze</th>
 						<td><p class="description">Nainstalováno: <strong><?php echo esc_html( WKF_VERSION ); ?></strong><?php
