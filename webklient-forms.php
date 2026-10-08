@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.6
+ * Version:           2.5.7
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -362,7 +362,7 @@ final class Webklient_Forms {
 			// Nenápadný podpis pod formulářem (odkaz na tvůrce webu).
 			'credit'            => 0,
 			// Sledování cesty návštěvníka k poptávce (vstupní stránka, zdroj, kroky).
-			'journey'           => 0,
+
 			'journey_steps'     => 30,
 			'journey_consent'   => '',
 			// Limit celkové velikosti příloh notifikace (MB); nad ním jdou jen odkazy.
@@ -458,7 +458,6 @@ final class Webklient_Forms {
 		$out['mapy_api_key']         = isset( $input['mapy_api_key'] ) ? sanitize_text_field( $input['mapy_api_key'] ) : '';
 		$out['fnx_api_key']          = isset( $input['fnx_api_key'] ) ? sanitize_text_field( $input['fnx_api_key'] ) : '';
 		$out['credit']          = empty( $input['credit'] ) ? 0 : 1;
-		$out['journey']         = empty( $input['journey'] ) ? 0 : 1;
 		$out['journey_steps']   = isset( $input['journey_steps'] ) ? max( 5, min( 100, absint( $input['journey_steps'] ) ) ) : 30;
 		$out['journey_consent'] = isset( $input['journey_consent'] ) ? sanitize_text_field( $input['journey_consent'] ) : '';
 		$out['attach_limit_mb'] = isset( $input['attach_limit_mb'] ) ? max( 1, min( 50, absint( $input['attach_limit_mb'] ) ) ) : 15;
@@ -4593,16 +4592,15 @@ step();});})();</script></div>';
 				<h3>Kontext návštěvy u poptávek</h3>
 				<table class="form-table" role="presentation">
 					<tr>
-						<th scope="row">Sledovat cestu návštěvníka</th>
-						<td><label><input type="checkbox" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[journey]" value="1" <?php checked( ! empty( $s['journey'] ) ); ?>> U každé poptávky ukládat vstupní stránku, zdroj návštěvy a prohlédnuté stránky</label>
-						&nbsp;maximálně <input type="number" style="width:70px;" min="5" max="100" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[journey_steps]" value="<?php echo esc_attr( $s['journey_steps'] ); ?>"> kroků
-						<p class="description"><strong>Bez téhle volby se nedozvíte, odkud návštěvník na web přišel.</strong> Server totiž při odeslání vidí jen stránku s formulářem, ne původní vyhledávání či odkaz – ten zachytí až tohle sledování při prvním načtení stránky. Do notifikace i záznamu pak přibude zdroj návštěvy (vyhledávač, sociální síť, kampaň, přímý vstup), vstupní stránka a cesta po webu.</p>
-						<p class="description">Data se drží jen v prohlížeči návštěvníka (sessionStorage, žádné cookies) a odešlou se teprve s formulářem. Vyhledávače dnes hledaný výraz většinou nepředávají – naplní se hlavně u placených kampaní s <code>utm_term</code>.</p></td>
+						<th scope="row">Co se ukládá</th>
+						<td><p class="description" style="margin-top:0;">Ke každé poptávce se zaznamená <strong>zdroj návštěvy</strong> (vyhledávač, sociální síť, kampaň podle UTM, odkaz z jiného webu, nebo přímý vstup), <strong>vstupní stránka</strong>, <strong>odkud návštěvník přišel</strong> a <strong>cesta po webu</strong> před odesláním. Bez toho by u poptávky zůstala jen stránka s formulářem – server při odeslání nic jiného nevidí.</p>
+						<p class="description">Zaznamenává se vždy. Data se drží jen v prohlížeči návštěvníka (sessionStorage, žádné cookies, nic na třetí strany) a odešlou se teprve ve chvíli, kdy návštěvník sám odešle formulář. Uloží se k záznamu a smažou se s ním.</p>
+						<p class="description">Délka cesty: maximálně <input type="number" style="width:70px;" min="5" max="100" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[journey_steps]" value="<?php echo esc_attr( $s['journey_steps'] ); ?>"> kroků. Vyhledávače dnes hledaný výraz většinou nepředávají – naplní se hlavně u placených kampaní s <code>utm_term</code>.</p></td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wkf_journey_consent">Vázat na souhlas</label></th>
 						<td><input type="text" id="wkf_journey_consent" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[journey_consent]" value="<?php echo esc_attr( $s['journey_consent'] ); ?>" placeholder="název_cookie:hodnota (např. wk_consent:analytics)">
-						<p class="description">Nepovinné. Když vyplníte, sledování se spustí jen tehdy, obsahuje-li uvedená cookie danou hodnotu – tak lze navázat na souhlas z cookie lišty. Prázdné = sledovat vždy.</p></td>
+						<p class="description">Nepovinné. Když vyplníte, záznam kontextu se pořídí jen tehdy, obsahuje-li uvedená cookie danou hodnotu – tím se dá navázat na cookie lištu, pokud web staví na souhlasu místo oprávněného zájmu. Prázdné = zaznamenávat vždy.</p></td>
 					</tr>
 				</table>
 
@@ -4921,7 +4919,7 @@ step();});})();</script></div>';
 	 */
 	public function enqueue_journey() {
 		$s = $this->get_settings();
-		if ( empty( $s['journey'] ) || is_admin() ) {
+		if ( is_admin() ) {
 			return;
 		}
 		// Volitelná vazba na souhlas: skript se načte, jen když cookie nese danou hodnotu.
@@ -5670,10 +5668,7 @@ step();});})();</script></div>';
 		$html  = '<input type="hidden" name="wkf_page_title" value="' . esc_attr( $page_title ) . '">';
 		$html .= '<input type="hidden" name="wkf_page_url" data-wkf-page-url value="' . esc_url( $page_url ) . '">';
 		$html .= '<input type="hidden" name="wkf_query_string" data-wkf-query-string value="' . esc_attr( $query_string ) . '">';
-		$s     = $this->get_settings();
-		if ( ! empty( $s['journey'] ) ) {
-			$html .= '<input type="hidden" name="wkf_journey" data-wkf-journey value="">';
-		}
+		$html .= '<input type="hidden" name="wkf_journey" data-wkf-journey value="">';
 		// Honeypot – skryté pole, které lidé nevyplní.
 		$html .= '<div class="wkf-hp" aria-hidden="true"><label>Nevyplňujte<input type="text" name="wkf_website_hp" tabindex="-1" autocomplete="off"></label></div>';
 		return $html;

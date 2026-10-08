@@ -30,8 +30,11 @@ orientační cenu, server ji přepočítá z vlastní definice. Ceny lze načít
 i z meta pole vlastního typu příspěvku.
 
 **Záznamy.** Každé odeslání se ukládá do administrace, filtruje podle
-formuláře a exportuje do CSV i XLSX. Volitelně se ukládá kontext návštěvy:
-vstupní stránka, zdroj, kampaň a cesta po webu před odesláním.
+formuláře a exportuje do CSV i XLSX. Ke každé poptávce se ukládá kontext
+návštěvy: zdroj (vyhledávač, sociální síť, kampaň, odkaz, přímý vstup), vstupní
+stránka, odkud návštěvník přišel a cesta po webu před odesláním. Server sám při
+odeslání vidí jen stránku s formulářem, proto se kontext sbírá už při prvním
+načtení stránky.
 
 **Doručení.** Notifikace s vlastním předmětem, odesílatelem a Reply-To,
 automatická odpověď odesílateli, SMTP odesílání, webhook do CRM (Lead API)
@@ -85,7 +88,10 @@ změn v okně „Zobrazit podrobnosti“ u aktualizace.
 Plugin neodesílá data nikam mimo web. Výjimkou jsou služby, které si sami
 zapnete a nakonfigurujete: našeptávání adres, ověření v RÚIAN, doplnění firmy
 z ARESu, Turnstile, SMTP server a webhook do vašeho CRM. Kontext návštěvy
-u poptávek se drží jen v prohlížeči návštěvníka a odešle se s formulářem.
+u poptávek se drží jen v prohlížeči návštěvníka (sessionStorage, žádné cookies)
+a odešle se teprve s formulářem; uloží se k záznamu poptávky a smaže se s ním.
+Provozovatel webu ho může navázat na cookie lištu, pokud nestaví na oprávněném
+zájmu – slouží k tomu volba Vázat na souhlas v nastavení.
 
 ## Akademický výzkum
 
