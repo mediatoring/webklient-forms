@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.5
+ * Version:           2.5.6
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -4330,12 +4330,17 @@ step();});})();</script></div>';
 			echo '<tr><th style="text-align:left;">Nahraný soubor</th><td><a href="' . esc_url( $file_url ) . '" target="_blank" rel="noopener">' . esc_html( basename( $file_url ) ) . '</a></td></tr>';
 		}
 
+		$referer_info = $this->referer_line(
+			get_post_meta( $post->ID, '_wkf_referer', true ),
+			get_post_meta( $post->ID, '_wkf_page_url', true )
+		);
+
 		$context = array(
 			'Ověření adresy (RÚIAN)' => get_post_meta( $post->ID, '_wkf_address_check', true ),
 			'Odesláno ze stránky' => get_post_meta( $post->ID, '_wkf_page_title', true ),
 			'URL stránky'         => get_post_meta( $post->ID, '_wkf_page_url', true ),
 			'Query parametry'     => get_post_meta( $post->ID, '_wkf_query_string', true ),
-			'Odkazující stránka'  => get_post_meta( $post->ID, '_wkf_referer', true ),
+			key( $referer_info ) ? key( $referer_info ) : 'Odkaz před odesláním' => (string) current( $referer_info ),
 			'Kontext návštěvy'    => $this->journey_html( get_post_meta( $post->ID, '_wkf_journey', true ) ),
 			'IP adresa'           => get_post_meta( $post->ID, '_wkf_ip', true ),
 			'Webhook / Lead API'  => get_post_meta( $post->ID, '_wkf_webhook_result', true ),
@@ -4591,6 +4596,7 @@ step();});})();</script></div>';
 						<th scope="row">Sledovat cestu návštěvníka</th>
 						<td><label><input type="checkbox" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[journey]" value="1" <?php checked( ! empty( $s['journey'] ) ); ?>> U každé poptávky ukládat vstupní stránku, zdroj návštěvy a prohlédnuté stránky</label>
 						&nbsp;maximálně <input type="number" style="width:70px;" min="5" max="100" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[journey_steps]" value="<?php echo esc_attr( $s['journey_steps'] ); ?>"> kroků
+						<p class="description"><strong>Bez téhle volby se nedozvíte, odkud návštěvník na web přišel.</strong> Server totiž při odeslání vidí jen stránku s formulářem, ne původní vyhledávání či odkaz – ten zachytí až tohle sledování při prvním načtení stránky. Do notifikace i záznamu pak přibude zdroj návštěvy (vyhledávač, sociální síť, kampaň, přímý vstup), vstupní stránka a cesta po webu.</p>
 						<p class="description">Data se drží jen v prohlížeči návštěvníka (sessionStorage, žádné cookies) a odešlou se teprve s formulářem. Vyhledávače dnes hledaný výraz většinou nepředávají – naplní se hlavně u placených kampaní s <code>utm_term</code>.</p></td>
 					</tr>
 					<tr>
@@ -5727,6 +5733,30 @@ step();});})();</script></div>';
 	}
 
 	/** Shrnutí cesty do řádků pro notifikaci, webhook a export. */
+	/**
+	 * Referer odeslaní říká jen to, na které stránce prohlížeč právě byl – u formuláře
+	 * odesílaného AJAXem je to vždy táž stránka. Jako „odkud návštěvník přišel“ ho lze
+	 * brát jen tehdy, když ukazuje mimo web; jinak je to krok po webu, nebo nic.
+	 */
+	private function referer_line( $referer, $page_url ) {
+		if ( ! $referer ) {
+			return array();
+		}
+		$normalize = static function ( $host ) {
+			return preg_replace( '/^www\./', '', strtolower( (string) $host ) );
+		};
+		$ref_host  = $normalize( wp_parse_url( $referer, PHP_URL_HOST ) );
+		$site_host = $normalize( wp_parse_url( home_url(), PHP_URL_HOST ) );
+
+		if ( $ref_host && $ref_host !== $site_host ) {
+			return array( 'Odkud přišel na web' => $referer );
+		}
+		if ( untrailingslashit( (string) $referer ) === untrailingslashit( (string) $page_url ) ) {
+			return array();
+		}
+		return array( 'Předchozí stránka na webu' => $referer );
+	}
+
 	private function journey_lines( $journey ) {
 		if ( empty( $journey ) || ! is_array( $journey ) ) {
 			return array();
@@ -7308,7 +7338,9 @@ step();});})();</script></div>';
 		if ( $query_string ) {
 			$lines[] = 'Query parametry URL: ' . $query_string;
 		}
-		$lines[] = 'Odkazující stránka: ' . ( $referer ? $referer : '—' );
+		foreach ( $this->referer_line( $referer, $page_url ) as $ref_label => $ref_value ) {
+			$lines[] = $ref_label . ': ' . $ref_value;
+		}
 
 		$from_name  = $config['from_name'] ? $config['from_name'] : $s['from_name'];
 		$from_email = $config['from_email'] && is_email( $config['from_email'] ) ? $config['from_email'] : $s['from_email'];
