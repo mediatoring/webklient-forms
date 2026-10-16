@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient Forms
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.5.8
+ * Version:           2.6.0
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -142,6 +142,10 @@ final class Webklient_Forms {
 		add_action( 'admin_post_wkf_mail_log_clear', array( $this, 'mail_log_clear' ) );
 		add_action( 'admin_post_wkf_toggle_box', array( $this, 'toggle_admin_box' ) );
 		add_action( 'wkf_webhook_retry', array( $this, 'webhook_dispatch' ) );
+		add_action( 'wkf_raynet_send', array( $this, 'raynet_dispatch' ) );
+		add_action( 'admin_post_wkf_raynet_catalog', array( $this, 'raynet_refresh_catalog' ) );
+		add_action( 'admin_post_wkf_raynet_test', array( $this, 'raynet_test_lead' ) );
+		add_action( 'admin_post_wkf_raynet_resend', array( $this, 'raynet_resend' ) );
 		add_action( 'wkf_daily_retention', array( $this, 'run_retention' ) );
 		add_action( 'init', array( $this, 'schedule_retention' ) );
 		add_action( 'admin_post_wkf_webhook_resend', array( $this, 'webhook_resend' ) );
@@ -370,6 +374,21 @@ final class Webklient_Forms {
 			'journey_consent'   => '',
 			// Limit celkové velikosti příloh notifikace (MB); nad ním jdou jen odkazy.
 			'attach_limit_mb' => 15,
+			// RAYNET CRM: nativní zakládání leadů.
+			'raynet_region'    => 'cz',
+			'raynet_api_url'   => '',
+			'raynet_instance'  => '',
+			'raynet_user'      => '',
+			'raynet_key'       => '',
+			'raynet_subject'   => '{formular} – {firma} – {jmeno}',
+			'raynet_priority'  => 'DEFAULT',
+			'raynet_owner'     => 0,
+			'raynet_category'  => 0,
+			'raynet_source'    => 0,
+			'raynet_tags'      => '',
+			'raynet_notify'    => '',
+			'raynet_path'      => 0,
+			'raynet_fields'    => array(),
 			// Lead API / webhook: každé odeslání se pošle jako JSON POST.
 			'webhook_url'    => '',
 			'webhook_header' => 'X-Lead-Key',
@@ -465,6 +484,35 @@ final class Webklient_Forms {
 		$out['journey_steps']   = isset( $input['journey_steps'] ) ? max( 5, min( 100, absint( $input['journey_steps'] ) ) ) : 30;
 		$out['journey_consent'] = isset( $input['journey_consent'] ) ? sanitize_text_field( $input['journey_consent'] ) : '';
 		$out['attach_limit_mb'] = isset( $input['attach_limit_mb'] ) ? max( 1, min( 50, absint( $input['attach_limit_mb'] ) ) ) : 15;
+		$out['raynet_region']   = isset( $input['raynet_region'] ) && in_array( $input['raynet_region'], array( 'cz', 'sk', 'com', 'eu', 'custom' ), true ) ? $input['raynet_region'] : 'cz';
+		$out['raynet_api_url']  = isset( $input['raynet_api_url'] ) ? esc_url_raw( trim( (string) $input['raynet_api_url'] ) ) : '';
+		$out['raynet_instance'] = isset( $input['raynet_instance'] ) ? sanitize_text_field( $input['raynet_instance'] ) : '';
+		$out['raynet_user']     = isset( $input['raynet_user'] ) ? sanitize_email( $input['raynet_user'] ) : '';
+		$out['raynet_subject']  = isset( $input['raynet_subject'] ) ? sanitize_text_field( $input['raynet_subject'] ) : '';
+		$out['raynet_priority'] = isset( $input['raynet_priority'] ) && in_array( $input['raynet_priority'], array( 'MINOR', 'DEFAULT', 'CRITICAL' ), true ) ? $input['raynet_priority'] : 'DEFAULT';
+		$out['raynet_owner']    = isset( $input['raynet_owner'] ) ? absint( $input['raynet_owner'] ) : 0;
+		$out['raynet_category'] = isset( $input['raynet_category'] ) ? absint( $input['raynet_category'] ) : 0;
+		$out['raynet_source']   = isset( $input['raynet_source'] ) ? absint( $input['raynet_source'] ) : 0;
+		$out['raynet_tags']     = isset( $input['raynet_tags'] ) ? sanitize_text_field( $input['raynet_tags'] ) : '';
+		$out['raynet_notify']   = isset( $input['raynet_notify'] ) ? sanitize_text_field( $input['raynet_notify'] ) : '';
+		$out['raynet_path']     = empty( $input['raynet_path'] ) ? 0 : 1;
+		$out['raynet_fields']   = array();
+		if ( isset( $input['raynet_fields'] ) && is_array( $input['raynet_fields'] ) ) {
+			foreach ( $input['raynet_fields'] as $token => $field_name ) {
+				$field_name = sanitize_text_field( (string) $field_name );
+				if ( '' !== $field_name && isset( $this->raynet_field_tokens()[ sanitize_key( $token ) ] ) ) {
+					$out['raynet_fields'][ sanitize_key( $token ) ] = $field_name;
+				}
+			}
+		}
+		// Klíč: prázdné pole = ponechat uložený, vyplněné se šifruje jako ostatní tajemství.
+		if ( isset( $input['raynet_key'] ) && '' !== $input['raynet_key'] ) {
+			$out['raynet_key'] = $this->encrypt_secret( sanitize_text_field( $input['raynet_key'] ) );
+		} else {
+			$existing_rn       = get_option( self::OPTION_KEY, array() );
+			$out['raynet_key'] = isset( $existing_rn['raynet_key'] ) ? $existing_rn['raynet_key'] : '';
+		}
+
 		$out['webhook_url']    = isset( $input['webhook_url'] ) ? esc_url_raw( trim( (string) $input['webhook_url'] ) ) : '';
 		$out['webhook_header'] = isset( $input['webhook_header'] ) && preg_match( '/^[A-Za-z0-9\-]{1,64}$/', (string) $input['webhook_header'] ) ? $input['webhook_header'] : 'X-Lead-Key';
 		if ( isset( $input['webhook_key'] ) && '' !== $input['webhook_key'] ) {
@@ -1830,6 +1878,30 @@ final class Webklient_Forms {
 				<th scope="row">Lead API / webhook</th>
 				<td><label><input type="checkbox" name="wkf_f_webhook" value="1" <?php checked( '0' !== get_post_meta( $post->ID, '_wkf_webhook', true ) ); ?>> Posílat záznamy na webhook (nastavený globálně v Nastavení)</label></td>
 			</tr>
+			<?php
+			$rn_catalog = $this->raynet_catalog();
+			$rn_select  = function ( $name, $meta_key, $items ) use ( $post ) {
+				$current = (int) get_post_meta( $post->ID, $meta_key, true );
+				echo '<select name="' . esc_attr( $name ) . '"><option value="">– podle výchozího nastavení –</option>';
+				foreach ( $items as $item_id => $item_label ) {
+					echo '<option value="' . (int) $item_id . '" ' . selected( $current, (int) $item_id, false ) . '>' . esc_html( $item_label ) . '</option>';
+				}
+				echo '</select>';
+			};
+			?>
+			<tr>
+				<th scope="row">RAYNET CRM</th>
+				<td><label><input type="checkbox" name="wkf_f_raynet" value="1" <?php checked( '1' === get_post_meta( $post->ID, '_wkf_raynet', true ) ); ?>> Zakládat z tohoto formuláře lead v Raynetu</label>
+				<?php if ( ! $this->raynet_is_configured() ) : ?>
+					<p class="description">Napojení na Raynet zatím není vyplněné – doplnit ho lze v <a href="<?php echo esc_url( admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings#wkf-sec-raynet' ) ); ?>">Nastavení</a>.</p>
+				<?php endif; ?>
+				<p class="description">Prázdná políčka níže přebírají výchozí hodnoty z nastavení.</p>
+				<p>Předmět: <input type="text" class="large-text" name="wkf_f_raynet_subject" value="<?php echo esc_attr( get_post_meta( $post->ID, '_wkf_raynet_subject', true ) ); ?>" placeholder="např. {formular} – {firma} – {jmeno}"></p>
+				<p>Vlastník: <?php $rn_select( 'wkf_f_raynet_owner', '_wkf_raynet_owner', $rn_catalog['owners'] ); ?>
+				&nbsp;Kategorie: <?php $rn_select( 'wkf_f_raynet_category', '_wkf_raynet_category', $rn_catalog['categories'] ); ?>
+				&nbsp;Zdroj kontaktu: <?php $rn_select( 'wkf_f_raynet_source', '_wkf_raynet_source', $rn_catalog['sources'] ); ?></p>
+				<p>Štítky: <input type="text" class="regular-text" name="wkf_f_raynet_tags" value="<?php echo esc_attr( get_post_meta( $post->ID, '_wkf_raynet_tags', true ) ); ?>" placeholder="oddělené čárkou"></p></td>
+			</tr>
 			<tr>
 				<th scope="row">Automatická odpověď</th>
 				<td><label><input type="checkbox" name="wkf_f_ar_enabled" value="1" <?php checked( $ar_on ); ?>> Posílat potvrzení na zadaný e-mail</label>
@@ -1877,6 +1949,12 @@ final class Webklient_Forms {
 		update_post_meta( $post_id, '_wkf_button', isset( $_POST['wkf_f_button'] ) ? sanitize_text_field( wp_unslash( $_POST['wkf_f_button'] ) ) : '' );
 		update_post_meta( $post_id, '_wkf_ar_enabled', empty( $_POST['wkf_f_ar_enabled'] ) ? 0 : 1 );
 		update_post_meta( $post_id, '_wkf_webhook', empty( $_POST['wkf_f_webhook'] ) ? '0' : '1' );
+		update_post_meta( $post_id, '_wkf_raynet', empty( $_POST['wkf_f_raynet'] ) ? '0' : '1' );
+		update_post_meta( $post_id, '_wkf_raynet_subject', isset( $_POST['wkf_f_raynet_subject'] ) ? sanitize_text_field( wp_unslash( $_POST['wkf_f_raynet_subject'] ) ) : '' );
+		update_post_meta( $post_id, '_wkf_raynet_tags', isset( $_POST['wkf_f_raynet_tags'] ) ? sanitize_text_field( wp_unslash( $_POST['wkf_f_raynet_tags'] ) ) : '' );
+		foreach ( array( 'owner', 'category', 'source' ) as $raynet_key ) {
+			update_post_meta( $post_id, '_wkf_raynet_' . $raynet_key, isset( $_POST[ 'wkf_f_raynet_' . $raynet_key ] ) ? absint( $_POST[ 'wkf_f_raynet_' . $raynet_key ] ) : 0 );
+		}
 		update_post_meta( $post_id, '_wkf_subject', isset( $_POST['wkf_f_subject'] ) ? sanitize_text_field( wp_unslash( $_POST['wkf_f_subject'] ) ) : '' );
 		update_post_meta( $post_id, '_wkf_from_name', isset( $_POST['wkf_f_from_name'] ) ? sanitize_text_field( wp_unslash( $_POST['wkf_f_from_name'] ) ) : '' );
 		update_post_meta( $post_id, '_wkf_from_email', isset( $_POST['wkf_f_from_email'] ) ? sanitize_email( wp_unslash( $_POST['wkf_f_from_email'] ) ) : '' );
@@ -2776,6 +2854,14 @@ final class Webklient_Forms {
 				'wkf_webhook_resend_' . $post->ID
 			);
 			$actions['wkf_resend'] = '<a href="' . esc_url( $resend_url ) . '">Lead API – odeslat znovu</a>';
+		}
+		if ( self::CPT_ENTRY === $post->post_type && current_user_can( 'manage_options' )
+			&& get_post_meta( $post->ID, '_wkf_raynet_lead', true ) ) {
+			$raynet_url = wp_nonce_url(
+				admin_url( 'admin-post.php?action=wkf_raynet_resend&entry=' . $post->ID ),
+				'wkf_raynet_resend_' . $post->ID
+			);
+			$actions['wkf_raynet_resend'] = '<a href="' . esc_url( $raynet_url ) . '">Raynet – odeslat znovu</a>';
 		}
 		if ( self::CPT_FORM === $post->post_type && current_user_can( 'edit_post', $post->ID ) ) {
 			$url = wp_nonce_url(
@@ -4235,16 +4321,21 @@ step();});})();</script></div>';
 	}
 
 	public function entry_columns( $columns ) {
-		return array(
-			'cb'        => isset( $columns['cb'] ) ? $columns['cb'] : '<input type="checkbox" />',
-			'title'     => 'Záznam',
-			'wkf_form'  => 'Formulář',
-			'wkf_email' => 'E-mail',
-			'wkf_phone' => 'Telefon',
-			'wkf_mail'  => 'Notifikace',
+		$own = array(
+			'cb'          => isset( $columns['cb'] ) ? $columns['cb'] : '<input type="checkbox" />',
+			'title'       => 'Záznam',
+			'wkf_form'    => 'Formulář',
+			'wkf_email'   => 'E-mail',
+			'wkf_phone'   => 'Telefon',
+			'wkf_mail'    => 'Notifikace',
 			'wkf_webhook' => 'Lead API',
-			'date'      => 'Datum',
 		);
+		// Sloupec Raynetu se ukáže jen tam, kde je napojení vyplněné.
+		if ( $this->raynet_is_configured() ) {
+			$own['wkf_raynet'] = 'Raynet';
+		}
+		$own['date'] = 'Datum';
+		return $own;
 	}
 
 	public function entry_column_content( $column, $post_id ) {
@@ -4259,6 +4350,17 @@ step();});})();</script></div>';
 				break;
 			case 'wkf_phone':
 				echo esc_html( get_post_meta( $post_id, '_wkf_phone', true ) );
+				break;
+			case 'wkf_raynet':
+				$lead_id = (int) get_post_meta( $post_id, '_wkf_raynet_lead_id', true );
+				$rn      = (string) get_post_meta( $post_id, '_wkf_raynet_result', true );
+				if ( $lead_id ) {
+					echo '<span style="color:#008a20;" title="' . esc_attr( $rn ) . '">lead ' . (int) $lead_id . '</span>';
+				} elseif ( '' === $rn ) {
+					echo '<span class="description">—</span>';
+				} else {
+					echo '<span style="color:#d63638;" title="' . esc_attr( $rn ) . '">' . esc_html( mb_strimwidth( $rn, 0, 60, '…' ) ) . '</span>';
+				}
 				break;
 			case 'wkf_webhook':
 				$wh = (string) get_post_meta( $post_id, '_wkf_webhook_result', true );
@@ -4358,6 +4460,7 @@ step();});})();</script></div>';
 			'Kontext návštěvy'    => $this->journey_html( get_post_meta( $post->ID, '_wkf_journey', true ) ),
 			'IP adresa'           => get_post_meta( $post->ID, '_wkf_ip', true ),
 			'Webhook / Lead API'  => get_post_meta( $post->ID, '_wkf_webhook_result', true ),
+			'RAYNET CRM'          => get_post_meta( $post->ID, '_wkf_raynet_result', true ),
 			'Zdroj (migrace)'     => get_post_meta( $post->ID, '_wkf_source', true ) ? get_post_meta( $post->ID, '_wkf_source', true ) . ' (migrováno ' . get_post_meta( $post->ID, '_wkf_migrated_at', true ) . ')' : '',
 			'Nahrané soubory'     => implode( "\n", array_map( function ( $f ) { return ( isset( $f['field'] ) ? $f['field'] . ': ' : '' ) . $f['url']; }, (array) get_post_meta( $post->ID, '_wkf_files', true ) ) ),
 			'Notifikace odeslána' => get_post_meta( $post->ID, '_wkf_mail_sent', true )
@@ -4424,6 +4527,7 @@ step();});})();</script></div>';
 					<a href="#wkf-sec-email">E-maily</a>
 					<a href="#wkf-sec-spam">Ochrana proti spamu</a>
 					<a href="#wkf-sec-integrace">Napojení na služby</a>
+					<a href="#wkf-sec-raynet">RAYNET CRM</a>
 					<a href="#wkf-sec-vzhled">Vzhled</a>
 					<a href="#wkf-sec-aktualizace">Aktualizace</a>
 				</nav>
@@ -4633,6 +4737,177 @@ step();});})();</script></div>';
 						<p class="description">Klíč se ukládá šifrovaně a posílá se v uvedené hlavičce. Výsledek předání vidíte u každého záznamu.</p></td>
 					</tr>
 				</table>
+
+				</div>
+
+				<div class="wkf-settings-section" id="wkf-sec-raynet">
+				<h2 class="wkf-settings-title">RAYNET CRM</h2>
+				<p class="description wkf-settings-intro">Odeslané formuláře se zakládají přímo jako leady v Raynetu. Zapíná se u každého formuláře zvlášť; webhook výše funguje dál a dá se používat souběžně.</p>
+				<?php
+				$rn         = $this->raynet_catalog();
+				$rn_note    = isset( $_GET['wkf_raynet_note'] ) ? sanitize_text_field( wp_unslash( $_GET['wkf_raynet_note'] ) ) : '';
+				$rn_status  = isset( $_GET['wkf_raynet'] ) ? sanitize_key( $_GET['wkf_raynet'] ) : '';
+				$rn_ready   = $this->raynet_is_configured();
+				if ( $rn_status ) :
+					$rn_class = in_array( $rn_status, array( 'ok', 'test-ok' ), true ) ? 'success' : ( 'part' === $rn_status ? 'warning' : 'error' );
+					?>
+					<div class="notice notice-<?php echo esc_attr( $rn_class ); ?> inline"><p>
+						<?php
+						switch ( $rn_status ) {
+							case 'ok':
+								echo 'Připojení funguje, číselníky i volitelná pole jsou načtené.';
+								break;
+							case 'part':
+								echo 'Připojení funguje, ale část údajů se načíst nepodařilo.';
+								break;
+							case 'test-ok':
+								echo 'Testovací lead se v Raynetu založil.';
+								break;
+							case 'test-fail':
+								echo 'Testovací lead se založit nepodařilo.';
+								break;
+							default:
+								echo 'Připojení k Raynetu se nepodařilo navázat.';
+						}
+						if ( $rn_note ) {
+							echo '<br><strong>Podrobnosti:</strong> ' . esc_html( $rn_note );
+						}
+						?>
+					</p></div>
+				<?php endif; ?>
+
+				<h3>Připojení</h3>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="wkf_raynet_region">Oblast instance</label></th>
+						<td><select id="wkf_raynet_region" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_region]">
+							<?php
+							foreach ( array(
+								'cz'     => 'Česko – app.raynet.cz',
+								'sk'     => 'Slovensko – app.raynetcrm.sk',
+								'com'    => 'Mezinárodní – app.raynetcrm.com',
+								'eu'     => 'EU – eu.raynetcrm.com',
+								'custom' => 'vlastní adresa API',
+							) as $region_key => $region_label ) :
+								?>
+								<option value="<?php echo esc_attr( $region_key ); ?>" <?php selected( $s['raynet_region'], $region_key ); ?>><?php echo esc_html( $region_label ); ?></option>
+							<?php endforeach; ?>
+						</select>
+						&nbsp;<input type="url" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_api_url]" value="<?php echo esc_attr( $s['raynet_api_url'] ); ?>" placeholder="https://vlastni.server/api/v2/">
+						<p class="description">Vlastní adresa se použije jen u volby „vlastní adresa API“ a musí končit na <code>/api/v2/</code>.</p></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wkf_raynet_instance">Název instance</label></th>
+						<td><input type="text" id="wkf_raynet_instance" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_instance]" value="<?php echo esc_attr( $s['raynet_instance'] ); ?>" placeholder="nazev-instance">
+						<p class="description">Posílá se v hlavičce <code>X-Instance-Name</code>. Je to ta část, kterou máte v adrese Raynetu po přihlášení.</p></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wkf_raynet_user">Uživatel a API klíč</label></th>
+						<td><input type="email" id="wkf_raynet_user" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_user]" value="<?php echo esc_attr( $s['raynet_user'] ); ?>" placeholder="uzivatel@firma.cz" autocomplete="off">
+						&nbsp;<input type="password" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_key]" value="" placeholder="<?php echo $s['raynet_key'] ? 'klíč uložen – vyplňte jen pro změnu' : 'API klíč'; ?>" autocomplete="new-password">
+						<p class="description">Klíč vytvoří administrátor Raynetu v Nastavení aplikace → Pro vývojáře → API klíče. Ukládá se šifrovaně (AES-256) a nikde se nezobrazuje.</p>
+						<p>
+							<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_raynet_catalog' ), 'wkf_raynet_catalog' ) ); ?>" class="button">Ověřit připojení a načíst číselníky</a>
+							<?php if ( $rn_ready ) : ?>
+								&nbsp;<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_raynet_test' ), 'wkf_raynet_test' ) ); ?>" class="button" onclick="return confirm('V Raynetu vznikne testovací lead, který pak můžete smazat. Pokračovat?');">Odeslat testovací lead</a>
+							<?php endif; ?>
+						</p>
+						<p class="description">
+						<?php
+						if ( $rn['loaded'] ) {
+							printf(
+								'Načteno %s: %d uživatelů, %d kategorií, %d zdrojů kontaktu, %d volitelných polí.',
+								esc_html( mysql2date( 'j. n. Y H:i', $rn['loaded'] ) ),
+								count( $rn['owners'] ),
+								count( $rn['categories'] ),
+								count( $rn['sources'] ),
+								count( $rn['fields'] )
+							);
+						} else {
+							echo 'Číselníky zatím načtené nejsou – bez nich nejdou vybrat vlastník, kategorie ani zdroj kontaktu.';
+						}
+						?>
+						</p></td>
+					</tr>
+				</table>
+
+				<h3>Výchozí hodnoty leadu</h3>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="wkf_raynet_subject">Předmět</label></th>
+						<td><input type="text" id="wkf_raynet_subject" class="large-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_subject]" value="<?php echo esc_attr( $s['raynet_subject'] ); ?>">
+						<p class="description">Značky <code>{formular}</code>, <code>{firma}</code>, <code>{jmeno}</code>, <code>{email}</code>, <code>{telefon}</code>. Prázdná značka po sobě nenechá osiřelý oddělovač.</p></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wkf_raynet_priority">Priorita a vlastník</label></th>
+						<td><select id="wkf_raynet_priority" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_priority]">
+							<?php foreach ( array( 'MINOR' => 'nízká', 'DEFAULT' => 'běžná', 'CRITICAL' => 'kritická' ) as $prio => $prio_label ) : ?>
+								<option value="<?php echo esc_attr( $prio ); ?>" <?php selected( $s['raynet_priority'], $prio ); ?>><?php echo esc_html( $prio_label ); ?></option>
+							<?php endforeach; ?>
+						</select>
+						&nbsp;Vlastník:
+						<select name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_owner]">
+							<option value="0">– nepřiřazovat –</option>
+							<?php foreach ( $rn['owners'] as $owner_id => $owner_name ) : ?>
+								<option value="<?php echo (int) $owner_id; ?>" <?php selected( (int) $s['raynet_owner'], (int) $owner_id ); ?>><?php echo esc_html( $owner_name ); ?></option>
+							<?php endforeach; ?>
+						</select></td>
+					</tr>
+					<tr>
+						<th scope="row">Kategorie a zdroj</th>
+						<td>Kategorie leadu:
+						<select name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_category]">
+							<option value="0">– nevyplňovat –</option>
+							<?php foreach ( $rn['categories'] as $cat_id => $cat_name ) : ?>
+								<option value="<?php echo (int) $cat_id; ?>" <?php selected( (int) $s['raynet_category'], (int) $cat_id ); ?>><?php echo esc_html( $cat_name ); ?></option>
+							<?php endforeach; ?>
+						</select>
+						&nbsp;Zdroj kontaktu:
+						<select name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_source]">
+							<option value="0">– nevyplňovat –</option>
+							<?php foreach ( $rn['sources'] as $src_id => $src_name ) : ?>
+								<option value="<?php echo (int) $src_id; ?>" <?php selected( (int) $s['raynet_source'], (int) $src_id ); ?>><?php echo esc_html( $src_name ); ?></option>
+							<?php endforeach; ?>
+						</select></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wkf_raynet_tags">Štítky a upozornění</label></th>
+						<td><input type="text" id="wkf_raynet_tags" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_tags]" value="<?php echo esc_attr( $s['raynet_tags'] ); ?>" placeholder="štítky oddělené čárkou">
+						&nbsp;<input type="text" class="regular-text" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_notify]" value="<?php echo esc_attr( $s['raynet_notify'] ); ?>" placeholder="e-maily pro upozornění, oddělené čárkou">
+						<p class="description">Na uvedené adresy pošle upozornění na nový lead sám Raynet. Notifikace z formuláře se nastavují zvlášť v sekci E-maily.</p></td>
+					</tr>
+					<tr>
+						<th scope="row">Poznámka leadu</th>
+						<td><label><input type="checkbox" name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_path]" value="1" <?php checked( ! empty( $s['raynet_path'] ) ); ?>> Připojit i cestu návštěvníka po webu</label>
+						<p class="description">Poznámka vždy obsahuje všechna vyplněná pole, název formuláře, stránku odeslání a původ návštěvy. Cesta po webu bývá dlouhá, proto je zvlášť.</p></td>
+					</tr>
+				</table>
+
+				<h3>Původ návštěvy do volitelných polí</h3>
+				<?php if ( ! $rn['fields'] ) : ?>
+					<p class="description">Volitelná pole leadu zatím nejsou načtená. Načtěte číselníky tlačítkem výše; pokud v Raynetu žádná volitelná pole u leadu nemáte, tahle část se nepoužije.</p>
+				<?php else : ?>
+					<p class="description">Ke každému údaji lze přiřadit volitelné pole leadu. Do číselných, logických a datových polí se nic nezapíše, proto se v nabídce neukazují. Když adresa stránky s formulářem nese vlastní UTM, použije se celá tahle sada; jinak ta z cesty návštěvníka.</p>
+					<table class="form-table" role="presentation">
+						<?php foreach ( $this->raynet_field_tokens() as $token => $token_label ) : ?>
+							<tr>
+								<th scope="row"><?php echo esc_html( $token_label ); ?></th>
+								<td><select name="<?php echo esc_attr( self::OPTION_KEY ); ?>[raynet_fields][<?php echo esc_attr( $token ); ?>]">
+									<option value="">– nepřiřazeno –</option>
+									<?php
+									$current_field = isset( $s['raynet_fields'][ $token ] ) ? $s['raynet_fields'][ $token ] : '';
+									foreach ( $rn['fields'] as $field ) :
+										if ( in_array( $field['type'], array( 'BIG_DECIMAL', 'BOOLEAN', 'DATE' ), true ) ) {
+											continue;
+										}
+										?>
+										<option value="<?php echo esc_attr( $field['name'] ); ?>" <?php selected( $current_field, $field['name'] ); ?>><?php echo esc_html( $field['label'] . ' (' . $field['name'] . ')' ); ?></option>
+									<?php endforeach; ?>
+								</select></td>
+							</tr>
+						<?php endforeach; ?>
+					</table>
+				<?php endif; ?>
 
 				</div>
 
@@ -4891,7 +5166,7 @@ step();});})();</script></div>';
 					return;
 				}
 				var url   = new URL( window.location.href ),
-					keys  = [ 'wkf_smtp_test', 'wkf_smtp_to', 'wkf_smtp_reason', 'wkf_smtp_used', 'wkf_update' ],
+					keys  = [ 'wkf_smtp_test', 'wkf_smtp_to', 'wkf_smtp_reason', 'wkf_smtp_used', 'wkf_update', 'wkf_raynet', 'wkf_raynet_note' ],
 					dirty = false;
 				keys.forEach( function ( key ) {
 					if ( url.searchParams.has( key ) ) {
@@ -6239,6 +6514,7 @@ step();});})();</script></div>';
 				update_post_meta( $entry_id, '_wkf_mail_error', sanitize_text_field( $this->last_mail_error ? $this->last_mail_error : 'Bez podrobností – wp_mail selhal ještě před předáním mail serveru.' ) );
 			}
 			$this->send_webhook( $entry_id, $form_type, $schema, $labels, $values, $page_url, $referer, $query_string );
+			$this->queue_raynet_lead( $entry_id, $form_type, $schema, $labels, $values, $page_url, $page_title, $referer, $query_string );
 		}
 
 		// Automatická odpověď klientovi.
@@ -6640,6 +6916,629 @@ step();});})();</script></div>';
 				wp_delete_post( $entry_id, true );
 			}
 		}
+	}
+
+	/* =========================================================
+	 * RAYNET CRM – zakládání leadů
+	 * ======================================================= */
+
+	/** Údaje o původu návštěvy, které lze přiřadit k volitelným polím leadu. */
+	private function raynet_field_tokens() {
+		return array(
+			'utm_source'   => 'UTM source',
+			'utm_medium'   => 'UTM medium',
+			'utm_campaign' => 'UTM campaign',
+			'utm_term'     => 'UTM term',
+			'utm_content'  => 'UTM content',
+			'gclid'        => 'GCLID',
+			'visit_source' => 'Zdroj návštěvy',
+			'landing'      => 'Vstupní stránka',
+			'referrer'     => 'Odkud návštěvník přišel',
+			'form_url'     => 'Stránka s formulářem',
+			'form_name'    => 'Název formuláře',
+		);
+	}
+
+	/** Adresa API podle zvolené oblasti, nebo vlastní. */
+	private function raynet_base_url() {
+		$s = $this->get_settings();
+		if ( 'custom' === $s['raynet_region'] ) {
+			$url = trim( (string) $s['raynet_api_url'] );
+			return $url ? trailingslashit( $url ) : '';
+		}
+		$regions = array(
+			'cz'  => 'https://app.raynet.cz/api/v2/',
+			'sk'  => 'https://app.raynetcrm.sk/api/v2/',
+			'com' => 'https://app.raynetcrm.com/api/v2/',
+			'eu'  => 'https://eu.raynetcrm.com/api/v2/',
+		);
+		return isset( $regions[ $s['raynet_region'] ] ) ? $regions[ $s['raynet_region'] ] : $regions['cz'];
+	}
+
+	/** Je napojení vyplněné natolik, že má smysl volat API? */
+	private function raynet_is_configured() {
+		$s = $this->get_settings();
+		return (bool) ( $s['raynet_instance'] && $s['raynet_user'] && $s['raynet_key'] && $this->raynet_base_url() );
+	}
+
+	/**
+	 * Jeden požadavek na Raynet. Vrací pole ok / code / data / message / retry.
+	 * API klíč se nikam nevypisuje – do výsledku se dostane jen zpráva od Raynetu.
+	 */
+	private function raynet_request( $method, $path, $body = null ) {
+		if ( ! $this->raynet_is_configured() ) {
+			return array( 'ok' => false, 'code' => 0, 'data' => array(), 'message' => 'Napojení na Raynet není vyplněné.', 'retry' => false );
+		}
+		$s    = $this->get_settings();
+		$args = array(
+			'method'  => $method,
+			'timeout' => 15,
+			'headers' => array(
+				'Authorization'   => 'Basic ' . base64_encode( $s['raynet_user'] . ':' . $this->decrypt_secret( $s['raynet_key'] ) ), // phpcs:ignore -- HTTP Basic dle dokumentace Raynetu
+				'X-Instance-Name' => $s['raynet_instance'],
+				'Accept'          => 'application/json',
+			),
+		);
+		if ( null !== $body ) {
+			$args['headers']['Content-Type'] = 'application/json';
+			$args['body']                    = wp_json_encode( $body, JSON_UNESCAPED_UNICODE );
+		}
+
+		$response = wp_remote_request( $this->raynet_base_url() . ltrim( $path, '/' ), $args );
+		if ( is_wp_error( $response ) ) {
+			// Spojení nevyšlo – data jsou v pořádku, má smysl to zkusit znovu.
+			return array( 'ok' => false, 'code' => 0, 'data' => array(), 'message' => 'Spojení s Raynetem selhalo: ' . $response->get_error_message(), 'retry' => true );
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		$data = json_decode( wp_remote_retrieve_body( $response ), true );
+		$data = is_array( $data ) ? $data : array();
+		if ( $code >= 200 && $code < 300 ) {
+			return array( 'ok' => true, 'code' => $code, 'data' => $data, 'message' => '', 'retry' => false );
+		}
+
+		return array(
+			'ok'      => false,
+			'code'    => $code,
+			'data'    => $data,
+			'message' => $this->raynet_error_message( $code, $data ),
+			// Chyba v datech ani odmítnuté přihlášení se neopakují: opakované
+			// přihlášení se špatnými údaji vede k zablokování IP adresy na hodinu.
+			'retry'   => ( 429 === $code || $code >= 500 ),
+		);
+	}
+
+	/** Srozumitelný důvod odmítnutí. */
+	private function raynet_error_message( $code, $data ) {
+		$detail = '';
+		if ( ! empty( $data['translatedMessage'] ) ) {
+			$detail = (string) $data['translatedMessage'];
+		} elseif ( ! empty( $data['message'] ) ) {
+			$detail = (string) $data['message'];
+		}
+		if ( 503 === $code && isset( $data['type'] ) && 'RequestLimitReached' === $data['type'] ) {
+			return 'Raynet odmítl požadavek, je vyčerpaný denní limit 24 000 dotazů. Zkusí se to znovu později.';
+		}
+		switch ( $code ) {
+			case 401:
+			case 403:
+				$prefix = 'Raynet odmítl přihlášení – zkontrolujte uživatele a API klíč. Opakovat se to nebude, protože po dvaceti pokusech se špatnými údaji Raynet zablokuje IP adresu webu na hodinu.';
+				break;
+			case 404:
+				$prefix = 'Raynet adresu nezná – zkontrolujte oblast instance a její název.';
+				break;
+			case 429:
+				$prefix = 'Raynet požadavek zatím odmítl kvůli počtu dotazů.';
+				break;
+			default:
+				$prefix = $code >= 500 ? 'Raynet hlásí chybu na své straně (HTTP ' . $code . ').' : 'Raynet požadavek odmítl (HTTP ' . $code . ').';
+		}
+		return $detail ? $prefix . ' ' . mb_strimwidth( $detail, 0, 300, '…' ) : $prefix;
+	}
+
+	/** Načtené uživatele, číselníky a volitelná pole si plugin drží mimo nastavení. */
+	private function raynet_catalog() {
+		$catalog = get_option( 'wkf_raynet_catalog', array() );
+		return is_array( $catalog ) ? wp_parse_args( $catalog, array( 'owners' => array(), 'categories' => array(), 'sources' => array(), 'fields' => array(), 'loaded' => '' ) ) : array( 'owners' => array(), 'categories' => array(), 'sources' => array(), 'fields' => array(), 'loaded' => '' );
+	}
+
+	/** Číselník id => název z odpovědi Raynetu (název je v code01). */
+	private function raynet_codelist( $path ) {
+		$result = $this->raynet_request( 'GET', $path . '?limit=1000' );
+		if ( ! $result['ok'] ) {
+			return $result;
+		}
+		$items = array();
+		foreach ( isset( $result['data']['data'] ) ? (array) $result['data']['data'] : array() as $item ) {
+			if ( ! empty( $item['id'] ) ) {
+				$items[ (int) $item['id'] ] = sanitize_text_field( isset( $item['code01'] ) ? $item['code01'] : ( isset( $item['name'] ) ? $item['name'] : '#' . $item['id'] ) );
+			}
+		}
+		$result['items'] = $items;
+		return $result;
+	}
+
+	/** Možní vlastníci leadu: kontaktní osoby platných uživatelských účtů. */
+	private function raynet_owners() {
+		$owners = array();
+		$offset = 0;
+		do {
+			$result = $this->raynet_request( 'GET', 'userAccount/?limit=1000&offset=' . $offset );
+			if ( ! $result['ok'] ) {
+				return $result;
+			}
+			$rows = isset( $result['data']['data'] ) ? (array) $result['data']['data'] : array();
+			foreach ( $rows as $row ) {
+				if ( isset( $row['rowInfo']['rowAccess'] ) && 'INVALID' === $row['rowInfo']['rowAccess'] ) {
+					continue;
+				}
+				if ( ! empty( $row['person']['id'] ) ) {
+					$owners[ (int) $row['person']['id'] ] = sanitize_text_field( isset( $row['person']['fullName'] ) ? $row['person']['fullName'] : '#' . $row['person']['id'] );
+				}
+			}
+			$offset += 1000;
+		} while ( count( $rows ) >= 1000 && $offset < 10000 );
+		$result['items'] = $owners;
+		return $result;
+	}
+
+	/** Volitelná pole leadu i s datovým typem – podle něj se rozhoduje, co se smí zapsat. */
+	private function raynet_custom_fields() {
+		$result = $this->raynet_request( 'GET', 'customField/config/' );
+		if ( ! $result['ok'] ) {
+			return $result;
+		}
+		$fields = array();
+		foreach ( isset( $result['data']['data']['Lead'] ) ? (array) $result['data']['data']['Lead'] : array() as $field ) {
+			if ( empty( $field['name'] ) ) {
+				continue;
+			}
+			$fields[] = array(
+				'name'  => sanitize_text_field( $field['name'] ),
+				'label' => sanitize_text_field( isset( $field['label'] ) ? $field['label'] : $field['name'] ),
+				'type'  => sanitize_text_field( isset( $field['dataType'] ) ? $field['dataType'] : '' ),
+			);
+		}
+		$result['items'] = $fields;
+		return $result;
+	}
+
+	/** Tlačítko „Ověřit připojení a načíst číselníky“. */
+	public function raynet_refresh_catalog() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Nedostatečná oprávnění.' );
+		}
+		check_admin_referer( 'wkf_raynet_catalog' );
+
+		$status = 'ok';
+		$note   = '';
+		if ( ! $this->raynet_is_configured() ) {
+			$status = 'fail';
+			$note   = 'Vyplňte název instance, uživatele a API klíč.';
+		} else {
+			$owners     = $this->raynet_owners();
+			$categories = $this->raynet_codelist( 'leadCategory/' );
+			$sources    = $this->raynet_codelist( 'contactSource/' );
+			$fields     = $this->raynet_custom_fields();
+
+			$failed = array();
+			foreach ( array( 'uživatelé' => $owners, 'kategorie leadu' => $categories, 'zdroje kontaktu' => $sources, 'volitelná pole' => $fields ) as $what => $part ) {
+				if ( ! $part['ok'] ) {
+					$failed[] = $what . ': ' . $part['message'];
+				}
+			}
+			// Přihlášení neprošlo – dál nemá smysl pokračovat a hlásí se jediná příčina.
+			if ( count( $failed ) === 4 ) {
+				$status = 'fail';
+				$note   = $owners['message'];
+			} else {
+				// Co se načíst nepodařilo, zůstane z předchozího načtení.
+				$previous = $this->raynet_catalog();
+				update_option(
+					'wkf_raynet_catalog',
+					array(
+						'owners'     => $owners['ok'] ? $owners['items'] : $previous['owners'],
+						'categories' => $categories['ok'] ? $categories['items'] : $previous['categories'],
+						'sources'    => $sources['ok'] ? $sources['items'] : $previous['sources'],
+						'fields'     => $fields['ok'] ? $fields['items'] : $previous['fields'],
+						'loaded'     => current_time( 'mysql' ),
+					),
+					false
+				);
+				$status = $failed ? 'part' : 'ok';
+				$note   = implode( ' | ', $failed );
+			}
+		}
+
+		$back = add_query_arg(
+			array(
+				'wkf_raynet'      => $status,
+				'wkf_raynet_note' => rawurlencode( mb_strimwidth( $note, 0, 300, '…' ) ),
+			),
+			admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' )
+		);
+		wp_safe_redirect( $back . '#wkf-sec-raynet' );
+		exit;
+	}
+
+	/** Tlačítko „Odeslat testovací lead“. */
+	public function raynet_test_lead() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Nedostatečná oprávnění.' );
+		}
+		check_admin_referer( 'wkf_raynet_test' );
+
+		$s    = $this->get_settings();
+		$host = wp_parse_url( home_url(), PHP_URL_HOST );
+		$lead = array(
+			'topic'      => 'TEST – Webklient Forms (' . $host . ')',
+			'priority'   => $s['raynet_priority'],
+			'leadDate'   => wp_date( 'Y-m-d' ),
+			'leadPerson' => true,
+			'notice'     => "Testovací lead z pluginu Webklient Forms.\nWeb: " . home_url() . "\nOdesláno: " . wp_date( 'j. n. Y H:i' ) . "\n\nTenhle lead vznikl ověřením napojení a dá se smazat.",
+		);
+		foreach ( array( 'owner' => 'raynet_owner', 'category' => 'raynet_category', 'contactSource' => 'raynet_source' ) as $field => $key ) {
+			if ( $s[ $key ] ) {
+				$lead[ $field ] = (int) $s[ $key ];
+			}
+		}
+
+		$result = $this->raynet_request( 'PUT', 'lead/', $lead );
+		$status = $result['ok'] ? 'test-ok' : 'test-fail';
+		$note   = $result['ok']
+			? 'ID leadu: ' . (string) ( isset( $result['data']['data']['id'] ) ? $result['data']['data']['id'] : '?' )
+			: $result['message'];
+
+		$back = add_query_arg(
+			array(
+				'wkf_raynet'      => $status,
+				'wkf_raynet_note' => rawurlencode( mb_strimwidth( $note, 0, 300, '…' ) ),
+			),
+			admin_url( 'edit.php?post_type=' . self::CPT_ENTRY . '&page=wkf-settings' )
+		);
+		wp_safe_redirect( $back . '#wkf-sec-raynet' );
+		exit;
+	}
+
+	/**
+	 * Předmět leadu ze šablony. Prázdná značka nesmí nechat osiřelý oddělovač,
+	 * aby z „{formular} – {firma} – {jmeno}“ nevzniklo „Kontakt –  – Jan Novák“.
+	 */
+	private function raynet_subject( $template, $tokens ) {
+		$subject = strtr( (string) $template, $tokens );
+		$before  = '';
+		// Oddělovač bez obsahu na jedné straně se škrtá, dokud se text mění.
+		while ( $before !== $subject ) {
+			$before  = $subject;
+			$subject = preg_replace( '/^[\s\x{2013}\x{2014}\-|,;:]+/u', '', $subject );
+			$subject = preg_replace( '/[\s\x{2013}\x{2014}\-|,;:]+$/u', '', $subject );
+			$subject = preg_replace( '/([\x{2013}\x{2014}\-|,;:])\s*\1/u', '$1', $subject );
+			$subject = preg_replace( '/\s{2,}/u', ' ', $subject );
+		}
+		return $subject ? $subject : 'Poptávka z webu';
+	}
+
+	/** Jméno na křestní a příjmení: poslední slovo je příjmení, zbytek křestní. */
+	private function raynet_split_name( $name ) {
+		$parts = preg_split( '/\s+/u', trim( (string) $name ), -1, PREG_SPLIT_NO_EMPTY );
+		if ( ! $parts ) {
+			return array( '', '' );
+		}
+		if ( 1 === count( $parts ) ) {
+			return array( '', $parts[0] );
+		}
+		$last = array_pop( $parts );
+		return array( implode( ' ', $parts ), $last );
+	}
+
+	/**
+	 * Původ návštěvy pro volitelná pole. UTM ze stránky s formulářem má přednost
+	 * před UTM z cesty návštěvníka, ale sady se nemíchají – buď jedna, nebo druhá.
+	 */
+	private function raynet_origin( $journey, $page_url ) {
+		$origin = array(
+			'utm_source'   => '',
+			'utm_medium'   => '',
+			'utm_campaign' => '',
+			'utm_term'     => '',
+			'utm_content'  => '',
+			'gclid'        => '',
+			'visit_source' => isset( $journey['source'] ) ? (string) $journey['source'] : '',
+			'landing'      => isset( $journey['landing'] ) ? (string) $journey['landing'] : '',
+			'referrer'     => isset( $journey['referrer'] ) ? (string) $journey['referrer'] : '',
+			'form_url'     => (string) $page_url,
+			'form_name'    => '',
+		);
+
+		$page_query = (string) wp_parse_url( (string) $page_url, PHP_URL_QUERY );
+		$page_utm   = array();
+		if ( $page_query ) {
+			parse_str( $page_query, $page_params );
+			foreach ( array( 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid' ) as $key ) {
+				if ( ! empty( $page_params[ $key ] ) && is_string( $page_params[ $key ] ) ) {
+					$page_utm[ $key ] = sanitize_text_field( $page_params[ $key ] );
+				}
+			}
+		}
+
+		$journey_utm = array();
+		foreach ( isset( $journey['utm'] ) && is_array( $journey['utm'] ) ? $journey['utm'] : array() as $key => $value ) {
+			$journey_utm[ sanitize_key( $key ) ] = sanitize_text_field( (string) $value );
+		}
+
+		$set = $page_utm ? $page_utm : $journey_utm;
+		foreach ( $set as $key => $value ) {
+			if ( isset( $origin[ $key ] ) ) {
+				$origin[ $key ] = $value;
+			}
+		}
+		return $origin;
+	}
+
+	/** Hodnoty pro volitelná pole leadu podle přiřazení v nastavení a typu pole. */
+	private function raynet_custom_values( $origin ) {
+		$s      = $this->get_settings();
+		$map    = is_array( $s['raynet_fields'] ) ? $s['raynet_fields'] : array();
+		$types  = array();
+		foreach ( $this->raynet_catalog()['fields'] as $field ) {
+			$types[ $field['name'] ] = $field['type'];
+		}
+
+		$values = array();
+		foreach ( $map as $token => $field_name ) {
+			if ( empty( $origin[ $token ] ) || '' === $field_name ) {
+				continue;
+			}
+			// Do čísel, logických hodnot a dat se text neposílá.
+			$type = isset( $types[ $field_name ] ) ? $types[ $field_name ] : '';
+			if ( in_array( $type, array( 'BIG_DECIMAL', 'BOOLEAN', 'DATE' ), true ) ) {
+				continue;
+			}
+			$values[ $field_name ] = mb_strimwidth( (string) $origin[ $token ], 0, 255, '…' );
+		}
+		return $values;
+	}
+
+	/** Sestaví lead z odeslaného formuláře a předá ho k odeslání na pozadí. */
+	private function queue_raynet_lead( $entry_id, $form_type, $schema, $labels, $values, $page_url, $page_title = '', $referer = '', $query_string = '' ) {
+		if ( ! $this->raynet_is_configured() ) {
+			return;
+		}
+		// Raynet se zapíná u každého formuláře zvlášť a ve výchozím stavu je vypnutý.
+		$post_id = isset( $schema['_custom'] ) ? (int) $schema['_custom'] : 0;
+		if ( ! $post_id || '1' !== get_post_meta( $post_id, '_wkf_raynet', true ) ) {
+			return;
+		}
+
+		$s         = $this->get_settings();
+		$form_name = isset( $schema['name'] ) ? $schema['name'] : $form_type;
+		$company   = isset( $values['firma'] ) ? trim( (string) $values['firma'] ) : '';
+		$reg_num   = isset( $values['ico'] ) ? trim( (string) $values['ico'] ) : '';
+		list( $first_name, $last_name ) = $this->raynet_split_name( isset( $values['jmeno'] ) ? $values['jmeno'] : '' );
+
+		$per_form = static function ( $meta_key ) use ( $post_id ) {
+			return trim( (string) get_post_meta( $post_id, $meta_key, true ) );
+		};
+
+		$subject = $this->raynet_subject(
+			$per_form( '_wkf_raynet_subject' ) ? $per_form( '_wkf_raynet_subject' ) : $s['raynet_subject'],
+			array(
+				'{formular}' => $form_name,
+				'{firma}'    => $company,
+				'{jmeno}'    => isset( $values['jmeno'] ) ? trim( (string) $values['jmeno'] ) : '',
+				'{email}'    => isset( $values['email'] ) ? trim( (string) $values['email'] ) : '',
+				'{telefon}'  => isset( $values['telefon'] ) ? trim( (string) $values['telefon'] ) : '',
+			)
+		);
+
+		$origin              = $this->raynet_origin( $this->current_journey, $page_url );
+		$origin['form_name'] = $form_name;
+
+		// Poznámka: celý formulář plus kontext, aby obchodník nemusel nikam chodit.
+		$notice = array( 'Formulář: ' . $form_name );
+		if ( $page_title || $page_url ) {
+			$notice[] = 'Odesláno ze stránky: ' . trim( $page_title . ' ' . ( $page_url ? '(' . $page_url . ')' : '' ) );
+		}
+		$notice[] = '';
+		foreach ( $labels as $label => $value ) {
+			$notice[] = $label . ': ' . ( is_array( $value ) ? implode( ', ', $value ) : $value );
+		}
+		if ( $this->current_uploads ) {
+			$notice[] = '';
+			foreach ( $this->current_uploads as $upload ) {
+				$notice[] = 'Soubor: ' . $upload['url'];
+			}
+		}
+		$journey_lines = $this->journey_lines( $this->current_journey );
+		if ( $journey_lines ) {
+			$notice[] = '';
+			$notice[] = '--- Původ návštěvy ---';
+			foreach ( $journey_lines as $jlabel => $jvalue ) {
+				// Cesta po webu je dlouhá, do poznámky jde jen když se o ni stojí.
+				if ( 'Cesta po webu' === $jlabel && empty( $s['raynet_path'] ) ) {
+					continue;
+				}
+				$notice[] = $jlabel . ': ' . $jvalue;
+			}
+		}
+		foreach ( array( 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid' ) as $utm_key ) {
+			if ( ! empty( $origin[ $utm_key ] ) ) {
+				$notice[] = $utm_key . ': ' . $origin[ $utm_key ];
+			}
+		}
+		if ( $query_string ) {
+			$notice[] = 'Query parametry: ' . $query_string;
+		}
+		if ( $referer ) {
+			foreach ( $this->referer_line( $referer, $page_url ) as $ref_label => $ref_value ) {
+				$notice[] = $ref_label . ': ' . $ref_value;
+			}
+		}
+
+		$tags = $per_form( '_wkf_raynet_tags' ) ? $per_form( '_wkf_raynet_tags' ) : $s['raynet_tags'];
+		$tags = array_values( array_filter( array_map( 'trim', explode( ',', (string) $tags ) ) ) );
+
+		$notify = array_values( array_filter( array_map( 'sanitize_email', array_map( 'trim', explode( ',', (string) $s['raynet_notify'] ) ) ) ) );
+
+		$lead = array(
+			'topic'      => $subject,
+			'priority'   => $s['raynet_priority'],
+			'leadDate'   => wp_date( 'Y-m-d' ),
+			// Bez firmy i bez IČO jde o poptávku fyzické osoby.
+			'leadPerson' => ( '' === $company && '' === $reg_num ),
+			'notice'     => implode( "\n", $notice ),
+		);
+		if ( '' !== $company ) {
+			$lead['companyName'] = $company;
+		}
+		if ( '' !== $reg_num ) {
+			$lead['regNumber'] = $reg_num;
+		}
+		if ( '' !== $first_name ) {
+			$lead['firstName'] = $first_name;
+		}
+		if ( '' !== $last_name ) {
+			$lead['lastName'] = $last_name;
+		}
+		$owner    = $per_form( '_wkf_raynet_owner' ) ? (int) $per_form( '_wkf_raynet_owner' ) : (int) $s['raynet_owner'];
+		$category = $per_form( '_wkf_raynet_category' ) ? (int) $per_form( '_wkf_raynet_category' ) : (int) $s['raynet_category'];
+		$source   = $per_form( '_wkf_raynet_source' ) ? (int) $per_form( '_wkf_raynet_source' ) : (int) $s['raynet_source'];
+		if ( $owner ) {
+			$lead['owner'] = $owner;
+		}
+		if ( $category ) {
+			$lead['category'] = $category;
+		}
+		if ( $source ) {
+			$lead['contactSource'] = $source;
+		}
+		if ( $tags ) {
+			$lead['tags'] = $tags;
+		}
+		if ( $notify ) {
+			$lead['notificationEmailAddresses'] = $notify;
+		}
+
+		$contact = array();
+		if ( ! empty( $values['email'] ) ) {
+			$contact['email'] = sanitize_email( $values['email'] );
+		}
+		if ( ! empty( $values['telefon'] ) ) {
+			$contact['tel1'] = sanitize_text_field( $values['telefon'] );
+		}
+		if ( $contact ) {
+			$lead['contactInfo'] = $contact;
+		}
+
+		$custom = $this->raynet_custom_values( $origin );
+		if ( $custom ) {
+			$lead['customFields'] = $custom;
+		}
+
+		update_post_meta( $entry_id, '_wkf_raynet_lead', wp_json_encode( $lead, JSON_UNESCAPED_UNICODE ) );
+		update_post_meta( $entry_id, '_wkf_raynet_attempts', 0 );
+
+		// Odeslání na pozadí – návštěvník nečeká, až se Raynet ozve.
+		if ( ! wp_next_scheduled( 'wkf_raynet_send', array( $entry_id ) ) ) {
+			wp_schedule_single_event( time(), 'wkf_raynet_send', array( $entry_id ) );
+		}
+	}
+
+	/**
+	 * Odešle připravený lead. Souběh automatického opakování a ruční akce hlídá
+	 * zámek v options (add_option selže, když řádek už existuje), takže ani dvě
+	 * současná volání nezaloží dva leady.
+	 */
+	public function raynet_dispatch( $entry_id, $force = false ) {
+		$entry_id = (int) $entry_id;
+		$lead     = (string) get_post_meta( $entry_id, '_wkf_raynet_lead', true );
+		if ( '' === $lead || ! $this->raynet_is_configured() ) {
+			return;
+		}
+		// Lead už existuje – podruhé jen na výslovné přání z administrace.
+		if ( ! $force && get_post_meta( $entry_id, '_wkf_raynet_lead_id', true ) ) {
+			return;
+		}
+
+		$lock_key = 'wkf_raynet_lock_' . $entry_id;
+		$locked   = add_option( $lock_key, time(), '', false );
+		if ( ! $locked ) {
+			$since = (int) get_option( $lock_key );
+			// Zámek po spadlém běhu se po dvou minutách přebírá.
+			if ( $since && ( time() - $since ) < 2 * MINUTE_IN_SECONDS ) {
+				return;
+			}
+			update_option( $lock_key, time(), false );
+		}
+
+		$attempt = (int) get_post_meta( $entry_id, '_wkf_raynet_attempts', true ) + 1;
+		update_post_meta( $entry_id, '_wkf_raynet_attempts', $attempt );
+
+		$data = json_decode( $lead, true );
+		$data = is_array( $data ) ? $data : array();
+		/**
+		 * Data leadu těsně před odesláním do Raynetu.
+		 *
+		 * @param array $data     Tělo požadavku PUT lead/.
+		 * @param int   $entry_id ID záznamu formuláře.
+		 */
+		$data   = apply_filters( 'wkf_raynet_lead_data', $data, $entry_id );
+		$result = $this->raynet_request( 'PUT', 'lead/', $data );
+
+		if ( $result['ok'] ) {
+			$lead_id = isset( $result['data']['data']['id'] ) ? (int) $result['data']['data']['id'] : 0;
+			update_post_meta( $entry_id, '_wkf_raynet_lead_id', $lead_id );
+			update_post_meta( $entry_id, '_wkf_raynet_result', 'lead založen' . ( $lead_id ? ' (ID ' . $lead_id . ')' : '' ) . ' [pokus ' . $attempt . ', ' . wp_date( 'j. n. H:i' ) . ']' );
+			/**
+			 * Lead v Raynetu je založený.
+			 *
+			 * @param int $lead_id  ID leadu v Raynetu.
+			 * @param int $entry_id ID záznamu formuláře.
+			 */
+			do_action( 'wkf_raynet_lead_created', $lead_id, $entry_id );
+		} else {
+			$retry = $result['retry'] && $attempt < 4;
+			update_post_meta(
+				$entry_id,
+				'_wkf_raynet_result',
+				$result['message'] . ' [pokus ' . $attempt . ', ' . wp_date( 'j. n. H:i' ) . ']' . ( $retry ? ' – zkusí se znovu' : '' )
+			);
+			if ( $retry ) {
+				$delays = array( 1 => 2 * MINUTE_IN_SECONDS, 2 => 15 * MINUTE_IN_SECONDS, 3 => HOUR_IN_SECONDS );
+				wp_schedule_single_event( time() + $delays[ $attempt ], 'wkf_raynet_send', array( $entry_id ) );
+			}
+		}
+
+		delete_option( $lock_key );
+	}
+
+	/** Ruční odeslání záznamu do Raynetu z administrace. */
+	public function raynet_resend() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Nedostatečná oprávnění.' );
+		}
+		$entry_id = isset( $_GET['entry'] ) ? absint( $_GET['entry'] ) : 0;
+		check_admin_referer( 'wkf_raynet_resend_' . $entry_id );
+
+		// Opakování u záznamu, který lead už má, založí v Raynetu další – proto potvrzení.
+		$existing = (int) get_post_meta( $entry_id, '_wkf_raynet_lead_id', true );
+		$confirm  = isset( $_GET['confirm'] ) && '1' === $_GET['confirm'];
+		if ( $existing && ! $confirm ) {
+			wp_die(
+				esc_html( 'K tomuhle záznamu už lead v Raynetu patří (ID ' . $existing . '). Dalším odesláním vznikne druhý lead, Raynet duplicity nespojuje.' ),
+				'Odeslat znovu do Raynetu?',
+				array(
+					'response'  => 409,
+					'back_link' => true,
+					'link_url'  => esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wkf_raynet_resend&confirm=1&entry=' . $entry_id ), 'wkf_raynet_resend_' . $entry_id ) ),
+					'link_text' => 'Ano, založit další lead',
+				)
+			);
+		}
+
+		$this->raynet_dispatch( $entry_id, true );
+		wp_safe_redirect( wp_get_referer() ? wp_get_referer() : admin_url( 'edit.php?post_type=' . self::CPT_ENTRY ) );
+		exit;
 	}
 
 	/* =========================================================
