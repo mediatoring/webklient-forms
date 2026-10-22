@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name:       Webklient Forms
+ * Plugin Name:       Webklient formuláře a SMTP
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.6.0
+ * Version:           2.6.1
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -4501,7 +4501,7 @@ step();});})();</script></div>';
 		$schemas = $this->build_base_schemas();
 		?>
 		<div class="wrap">
-			<h1>Webklient Forms – nastavení</h1>
+			<h1>Webklient formuláře a SMTP – nastavení</h1>
 			<form method="post" action="options.php">
 				<?php settings_fields( 'wkf_settings_group' ); ?>
 
@@ -4549,6 +4549,9 @@ step();});})();</script></div>';
 				</table>
 
 				<h3>SMTP odesílání</h3>
+				<?php if ( is_multisite() ) : ?>
+					<p class="description">Tohle nastavení platí jen pro <strong><?php echo esc_html( get_bloginfo( 'name' ) ); ?></strong>. Každý web v síti má vlastní odesílatele, vlastní SMTP server i vlastní log pošty – nastavují se tedy na každém webu zvlášť.</p>
+				<?php endif; ?>
 				<?php if ( class_exists( 'Webklient_SMTP_Logger_Pro' ) ) : ?>
 					<p class="description"><strong>Na webu běží Webklient SMTP Logger Pro – odesílání e-mailů řídí on a nastavení níže se nepoužije.</strong></p>
 				<?php endif; ?>

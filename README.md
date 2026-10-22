@@ -1,9 +1,12 @@
-# Webklient Forms
+# Webklient formuláře a SMTP
 
 Formuláře pro WordPress od studia [Webklient.cz](https://www.webklient.cz/):
 builder s podmíněnou logikou, vícekrokové formuláře, záznamy s exportem,
-napojení na CRM a migrace z WPForms. Vyvinuto jako plnohodnotná náhrada
-komerčních formulářových pluginů.
+vlastní SMTP odesílání s logem pošty, napojení na CRM a migrace z WPForms.
+Vyvinuto jako plnohodnotná náhrada komerčních formulářových pluginů.
+
+Složka pluginu, textová doména i zdroj aktualizací zůstávají `webklient-forms`
+– změnil se jen název, pod kterým se plugin hlásí v administraci.
 
 ## Co plugin umí
 
@@ -55,6 +58,15 @@ s automatickou skartací.
 souboru exportu včetně polí, voleb, podmínek a nastavení notifikací, převezme
 původní shortcode a vypíše report rozdílů. Samostatný nástroj převede
 i odeslané záznamy včetně příloh.
+
+## Multisite
+
+Na multisite se plugin aktivuje pro celou síť, ale **nastavení je vždy per web**:
+každý web v síti má vlastní odesílatele, vlastní SMTP server, vlastní klíče,
+vlastní formuláře i vlastní log pošty (každý web má svou tabulku logu). To je
+záměr – plugin tím nahrazuje samostatný SMTP plugin na každém webu v síti.
+Společná pro celou síť je jen kontrola aktualizací, aby se síť ptala GitHubu
+jednou místo za každý web zvlášť.
 
 ## Instalace
 
