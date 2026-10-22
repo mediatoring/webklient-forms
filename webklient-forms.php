@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Webklient formuláře a SMTP
  * Description:       Formuláře pro WordPress jako plnohodnotná náhrada komerčních formulářových pluginů. Builder s podmíněnou logikou, vícekrokovými formuláři a ceníkovými volbami, záznamy odeslání s exportem do CSV a XLSX, notifikace a HTML automatická odpověď, vlastní SMTP odesílání s logem pošty, ochrana Turnstile, kontrolní otázkou a honeypotem, našeptávání adres s ověřením v RÚIAN, doplnění firmy z ARESu, webhook do CRM a import z WPForms včetně odeslaných záznamů.
- * Version:           2.6.1
+ * Version:           2.7.0
  * Plugin URI:        https://github.com/mediatoring/webklient-forms
  * Author:            Webklient.cz
  * Author URI:        https://www.webklient.cz
@@ -3790,6 +3790,7 @@ step();});})();</script></div>';
 			}
 			update_post_meta( $entry_id, '_wkf_form_type', $target->post_name );
 			update_post_meta( $entry_id, '_wkf_fields', $labels );
+			update_post_meta( $entry_id, '_wkf_values', $values );
 			update_post_meta( $entry_id, '_wkf_email', isset( $values['email'] ) ? $values['email'] : '' );
 			update_post_meta( $entry_id, '_wkf_phone', isset( $values['telefon'] ) ? $values['telefon'] : '' );
 			update_post_meta( $entry_id, '_wkf_ip', isset( $entry['ip_address'] ) ? sanitize_text_field( $entry['ip_address'] ) : '' );
@@ -6485,6 +6486,9 @@ step();});})();</script></div>';
 		if ( ! is_wp_error( $entry_id ) ) {
 			update_post_meta( $entry_id, '_wkf_form_type', $form_type );
 			update_post_meta( $entry_id, '_wkf_fields', $labels );
+			// Hodnoty podle klíčů polí. Popisky se dají kdykoli přejmenovat, klíče ne,
+			// takže reporty a napojení mají na čem stavět i po úpravě formuláře.
+			update_post_meta( $entry_id, '_wkf_values', $values );
 			update_post_meta( $entry_id, '_wkf_email', isset( $values['email'] ) ? $values['email'] : '' );
 			update_post_meta( $entry_id, '_wkf_phone', isset( $values['telefon'] ) ? $values['telefon'] : '' );
 			if ( $journey ) {
